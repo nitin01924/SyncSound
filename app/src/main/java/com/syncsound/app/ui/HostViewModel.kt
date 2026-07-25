@@ -16,10 +16,14 @@ class HostViewModel(private val repository: SessionRepository) : ViewModel() {
 
     fun approve(id: String) = repository.approve(id)
     fun reject(id: String) = repository.reject(id)
-    fun selectAudio(uri: Uri) = repository.selectAudio(uri)
+    fun remove(id: String) = repository.remove(id)
+    fun testSync() = repository.testSync()
+    fun selectAudio(uris: List<Uri>) = repository.selectAudio(uris)
     fun play() = repository.hostPlay()
     fun pause() = repository.hostPause()
     fun stop() = repository.hostStop()
+    fun skip() = repository.hostSkip()
+    fun disconnect() = repository.stopHosting()
 
     override fun onCleared() {
         repository.stopHosting()

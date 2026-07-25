@@ -29,7 +29,11 @@ object Protocol {
         PLAY(8),
         PAUSE(9),
         STOP(10),
-        ERROR(11);
+        ERROR(11),
+        REMOVE(12),
+        TEST_TONE(13),
+        TEST_RESULT(14),
+        HOST_INFO(15);
 
         companion object {
             fun fromWire(value: Int): Message =

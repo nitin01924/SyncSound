@@ -15,10 +15,27 @@ class ClientViewModel(private val repository: SessionRepository) : ViewModel() {
     }
 
     fun join(session: DiscoveredSession) =
-        repository.join(session.address.hostAddress.orEmpty(), session.port)
+        repository.join(
+            session.address.hostAddress.orEmpty(),
+            session.port,
+            session.sessionCode,
+        )
 
-    fun joinManual(address: String) = repository.join(address)
+    fun joinManual(address: String, sessionCode: String) =
+        repository.join(address, sessionCode = sessionCode)
+
+    fun joinByCode(sessionCode: String) {
+        val session = state.value.sessions.firstOrNull { it.sessionCode == sessionCode }
+        if (session != null) join(session) else repository.clientError(
+            "No nearby session matches that code. Try Refresh or use the Host IP.",
+        )
+    }
+
     fun refresh() = repository.startDiscovery()
+    fun disconnect() {
+        repository.leaveClient()
+        repository.startDiscovery()
+    }
 
     override fun onCleared() {
         repository.leaveClient()

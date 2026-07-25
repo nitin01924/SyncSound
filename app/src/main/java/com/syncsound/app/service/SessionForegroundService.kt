@@ -14,6 +14,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.syncsound.app.MainActivity
 import com.syncsound.app.R
+import com.syncsound.app.logging.AppLog
+import com.syncsound.app.logging.LogArea
 
 /**
  * Keeps an active local-network audio session eligible to run when the display
@@ -30,17 +32,22 @@ class SessionForegroundService : Service() {
                 NotificationManager.IMPORTANCE_LOW,
             ),
         )
-        ServiceCompat.startForeground(
-            this,
-            NOTIFICATION_ID,
-            notification(),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-            } else {
-                0
-            },
-        )
+        try {
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                notification(),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                } else {
+                    0
+                },
+            )
+        } catch (error: Exception) {
+            AppLog.e(LogArea.SESSION, "foreground_service_failed", error)
+            stopSelf()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
@@ -69,9 +76,12 @@ class SessionForegroundService : Service() {
         private const val CHANNEL_ID = "syncsound_session"
         private const val NOTIFICATION_ID = 1001
 
-        fun start(context: Context) {
+        fun start(context: Context): Boolean = runCatching {
             context.startForegroundService(Intent(context, SessionForegroundService::class.java))
-        }
+            true
+        }.onFailure {
+            AppLog.e(LogArea.SESSION, "foreground_service_start_failed", it)
+        }.getOrDefault(false)
 
         fun stop(context: Context) {
             context.stopService(Intent(context, SessionForegroundService::class.java))

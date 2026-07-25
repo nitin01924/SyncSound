@@ -3,7 +3,7 @@
 ## Scope
 
 Version 1 is a native, single-activity Android app. Kotlin and Compose own the UI
-and lifecycle. The Host decodes a selected MP3 with `MediaExtractor` and
+and lifecycle. The Host decodes selected music with `MediaExtractor` and
 `MediaCodec`, plays the resulting PCM locally with `AudioTrack`, and fans the
 same PCM data out to approved Clients over UDP.
 
@@ -34,9 +34,11 @@ address because routers and hotspots sometimes suppress mDNS.
 TCP port `45121` carries the versioned control protocol:
 
 - Client identity and pending/approved/rejected state.
+- Host identity and six-digit session code validation.
 - Clock pings.
 - Audio format.
 - Future-timestamped play, pause, and stop commands.
+- Sync-test commands and per-device acknowledgements.
 
 UDP port `45122` carries PCM packets no larger than 1,200 bytes. Every packet has
 a protocol version, stream ID, sequence number, Host monotonic presentation
@@ -46,6 +48,12 @@ at the Host immediately before every fan-out.
 Version 1 uses clear local-network transport. The Host approval gate prevents
 uninvited playback but is not cryptographic authentication. TLS and authenticated
 media encryption belong in a security-hardening release before public release.
+
+Control writes use one serialized outbound queue so FORMAT always precedes PLAY.
+Socket exceptions are contained on the IO supervisor, converted to explicit
+connection state, and logged. Approved device identities can reconnect during
+the same Host session with bounded exponential backoff. Ending the Host session
+sends a terminal removal message so Clients do not retry forever.
 
 ## Synchronization
 
@@ -73,7 +81,8 @@ time instead of command arrival time.
 
 - Small groups only. PCM uses roughly 1.4–1.5 Mbit/s per stereo 44.1/48 kHz
   Client before Wi-Fi overhead.
-- MP3 input only.
+- MP3, common PCM WAV, AAC/M4A, and FLAC are accepted. Actual codec support can
+  still vary with the Android device.
 - Phone speakers or wired output; Bluetooth adds uncontrolled latency.
 - Android may still stop a session under exceptional resource pressure; the
   foreground notification must remain visible.

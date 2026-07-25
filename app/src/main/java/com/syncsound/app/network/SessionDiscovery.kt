@@ -4,6 +4,8 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
+import com.syncsound.app.logging.AppLog
+import com.syncsound.app.logging.LogArea
 import com.syncsound.app.model.DiscoveredSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,21 +35,31 @@ class NsdSessionDiscovery(context: Context) : SessionDiscovery {
     override fun advertise(name: String, port: Int) {
         stopAdvertising()
         val listener = object : NsdManager.RegistrationListener {
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) = Unit
-            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                AppLog.i(LogArea.DISCOVERY, "service_registered", "name" to serviceInfo.serviceName)
+            }
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                AppLog.e(LogArea.DISCOVERY, "service_registration_failed", null, "code" to errorCode)
+            }
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                AppLog.i(LogArea.DISCOVERY, "service_unregistered")
+            }
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                AppLog.w(LogArea.DISCOVERY, "service_unregistration_failed", null, "code" to errorCode)
+            }
         }
         registrationListener = listener
-        nsd.registerService(
-            NsdServiceInfo().apply {
-                serviceName = name
-                serviceType = Protocol.SERVICE_TYPE
-                setPort(port)
-            },
-            NsdManager.PROTOCOL_DNS_SD,
-            listener,
-        )
+        runCatching {
+            nsd.registerService(
+                NsdServiceInfo().apply {
+                    serviceName = name
+                    serviceType = Protocol.SERVICE_TYPE
+                    setPort(port)
+                },
+                NsdManager.PROTOCOL_DNS_SD,
+                listener,
+            )
+        }.onFailure { AppLog.e(LogArea.DISCOVERY, "advertise_failed", it) }
     }
 
     override fun stopAdvertising() {
@@ -57,18 +69,25 @@ class NsdSessionDiscovery(context: Context) : SessionDiscovery {
 
     override fun startDiscovery() {
         if (discoveryListener != null) return
-        multicastLock = wifi.createMulticastLock("syncsound-discovery").apply {
-            setReferenceCounted(false)
-            acquire()
-        }
+        multicastLock = runCatching {
+            wifi.createMulticastLock("syncsound-discovery").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.onFailure { AppLog.w(LogArea.DISCOVERY, "multicast_lock_failed", it) }.getOrNull()
         val listener = object : NsdManager.DiscoveryListener {
-            override fun onDiscoveryStarted(serviceType: String) = Unit
-            override fun onDiscoveryStopped(serviceType: String) = Unit
+            override fun onDiscoveryStarted(serviceType: String) {
+                AppLog.i(LogArea.DISCOVERY, "discovery_started")
+            }
+            override fun onDiscoveryStopped(serviceType: String) {
+                AppLog.i(LogArea.DISCOVERY, "discovery_stopped")
+            }
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = stopDiscovery()
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = stopDiscovery()
             override fun onServiceLost(serviceInfo: NsdServiceInfo) {
                 found.entries.removeAll { it.value.name == serviceInfo.serviceName }
                 _sessions.value = found.values.toList()
+                AppLog.i(LogArea.DISCOVERY, "service_lost", "name" to serviceInfo.serviceName)
             }
 
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
@@ -78,15 +97,33 @@ class NsdSessionDiscovery(context: Context) : SessionDiscovery {
                     override fun onServiceResolved(info: NsdServiceInfo) {
                         @Suppress("DEPRECATION")
                         val host = info.host ?: return
-                        val session = DiscoveredSession(info.serviceName, host, info.port)
+                        val code = Regex("""\b\d{6}\b""")
+                            .find(info.serviceName)?.value.orEmpty()
+                        val session = DiscoveredSession(
+                            info.serviceName,
+                            host,
+                            info.port,
+                            sessionCode = code,
+                        )
                         found[session.key] = session
                         _sessions.value = found.values.toList()
+                        AppLog.i(
+                            LogArea.DISCOVERY,
+                            "service_resolved",
+                            "name" to session.name,
+                            "address" to host.hostAddress,
+                        )
                     }
                 })
             }
         }
         discoveryListener = listener
-        nsd.discoverServices(Protocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+        runCatching {
+            nsd.discoverServices(Protocol.SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+        }.onFailure {
+            AppLog.e(LogArea.DISCOVERY, "discovery_failed", it)
+            stopDiscovery()
+        }
     }
 
     override fun stopDiscovery() {

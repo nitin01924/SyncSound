@@ -60,13 +60,15 @@ for automatic session discovery.
 2. Put both phones on the same Wi-Fi network or hotspot.
 3. Open SyncSound on phone A and tap **Create Session**.
 4. Open SyncSound on phone B and tap **Join Session**.
-5. Select the discovered Host. If none appears, enter phone A's displayed IPv4
-   address under **Manual connection**.
+5. Select the discovered Host, enter its six-digit Session Code, or enter phone
+   A's displayed IPv4 address under **Manual connection**.
 6. Phone A displays the pending device. Tap **Approve**.
-7. On phone A, tap **Select MP3** and choose a local, non-DRM MP3.
-8. Tap **Play**. The app waits 1.5 seconds to fill Client buffers and then starts
+7. Tap **Test Sync**. Both phones should play the same short confirmation tone
+   and phone A should show `success` for phone B.
+8. On phone A, tap **Select music** and choose one or more supported files.
+9. Tap **Play**. The app waits 1.5 seconds to fill Client buffers and then starts
    both speakers.
-9. Exercise Pause, Play, and Stop. Rejecting a pending phone should prevent it
+10. Exercise Pause, Play, Stop, and Skip. Rejecting a pending phone should prevent it
    from receiving media.
 
 Keep the SyncSound session notification enabled on both phones. It allows the
@@ -81,8 +83,20 @@ Bluetooth routes, and overloaded 2.4 GHz networks can prevent good results.
 - **No sessions found:** use the manual IP shown on the Host.
 - **Manual connection fails:** verify the two phones can communicate and that
   the hotspot/router does not isolate clients.
-- **No audio file accepted:** Version 1 intentionally accepts MP3 audio only.
+- **No audio file accepted:** use MP3, PCM WAV, AAC, FLAC, or M4A. Actual decoding
+  support still depends on the codecs supplied by the phone manufacturer.
 - **Audio breaks up:** move to 5 GHz Wi-Fi, reduce the number of Clients, and
   keep all phones awake with SyncSound visible.
 - **Build cannot find Java:** set Gradle JDK to Android Studio's bundled JDK 17
   under Android Studio Gradle settings.
+
+## Diagnostic logs
+
+All important events use the `SyncSound` Logcat tag and structured
+`area=... event=...` fields:
+
+```bash
+adb logcat -s SyncSound
+```
+
+Capture logs from both phones when reporting a network or synchronization issue.

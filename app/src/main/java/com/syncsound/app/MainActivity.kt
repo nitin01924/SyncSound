@@ -14,16 +14,21 @@ import com.syncsound.app.ui.theme.SyncSoundTheme
  * recomposition because they are owned by repository-backed ViewModels.
  */
 class MainActivity : ComponentActivity() {
-    private val nearbyPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    private val notificationsPermission =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val runtimePermissions =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val repository = (application as SyncSoundApplication).container.repository
+            results.filterValues { granted -> !granted }.keys.forEach(repository::permissionDenied)
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            nearbyPermission.launch(Manifest.permission.NEARBY_WIFI_DEVICES)
-            notificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            runtimePermissions.launch(
+                arrayOf(
+                    Manifest.permission.NEARBY_WIFI_DEVICES,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ),
+            )
         }
         val repository = (application as SyncSoundApplication).container.repository
         setContent {

@@ -6,8 +6,11 @@ import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.SystemClock
 import com.syncsound.app.model.PlaybackState
+import com.syncsound.app.logging.AppLog
+import com.syncsound.app.logging.LogArea
 import com.syncsound.app.network.Protocol
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -37,13 +40,21 @@ class ClientAudioReceiver {
     @Volatile private var allowedHost: InetAddress? = null
     private var startJob: Job? = null
     private var renderedUntilNanos: Long? = null
+    private var invalidPacketCount = 0
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state
+    private val _errors = MutableStateFlow<String?>(null)
+    val errors: StateFlow<String?> = _errors
 
     fun start(host: InetAddress) {
         allowedHost = host
         if (scope != null) return
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { receiverScope ->
+        val exceptionHandler = CoroutineExceptionHandler { _, error ->
+            AppLog.e(LogArea.AUDIO, "client_audio_coroutine_failed", error)
+            _errors.value = error.message ?: "Client audio failed"
+            _state.value = PlaybackState.STOPPED
+        }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler).also { receiverScope ->
             receiverScope.launch {
                 val udp = DatagramSocket(Protocol.MEDIA_PORT).apply { soTimeout = 500 }.also { socket = it }
                 val bytes = ByteArray(Protocol.MAX_DATAGRAM_BYTES)
@@ -52,7 +63,19 @@ class ClientAudioReceiver {
                         val datagram = DatagramPacket(bytes, bytes.size)
                         udp.receive(datagram)
                         if (datagram.address != allowedHost) continue
-                        PcmPacket.decode(datagram.data, datagram.length)?.let { packet ->
+                        val decoded = PcmPacket.decode(datagram.data, datagram.length)
+                        if (decoded == null) {
+                            invalidPacketCount++
+                            if (invalidPacketCount == 1 || invalidPacketCount % 100 == 0) {
+                                AppLog.w(
+                                    LogArea.NETWORK,
+                                    "invalid_media_packet",
+                                    null,
+                                    "count" to invalidPacketCount,
+                                )
+                            }
+                        }
+                        decoded?.let { packet ->
                             synchronized(lock) {
                                 queue[packet.sequence] = packet
                                 while (queue.size > 400) queue.pollFirstEntry()
@@ -152,16 +175,37 @@ class ClientAudioReceiver {
 
                 val gapNanos = packet.presentationTimeNanos - renderedUntil
                 if (gapNanos > 0) {
+                    AppLog.w(
+                        LogArea.AUDIO,
+                        "packet_gap",
+                        null,
+                        "gapMs" to gapNanos / 1_000_000,
+                        "sequence" to packet.sequence,
+                    )
                     val gapFrames = (gapNanos * packet.sampleRate / 1_000_000_000L)
                         .coerceAtMost(packet.sampleRate.toLong() / 5)
                     if (gapFrames > 0) {
                         val silence = ByteArray((gapFrames * bytesPerFrame).toInt())
-                        track.write(silence, 0, silence.size, AudioTrack.WRITE_BLOCKING)
+                        writeFully(track, silence)
                     }
                 }
-                track.write(packet.payload, 0, packet.payload.size, AudioTrack.WRITE_BLOCKING)
+                writeFully(track, packet.payload)
                 renderedUntilNanos = maxOf(renderedUntil, packetEnd)
             }
+        }
+    }
+
+    private fun writeFully(track: AudioTrack, bytes: ByteArray) {
+        var offset = 0
+        while (offset < bytes.size) {
+            val written = track.write(
+                bytes,
+                offset,
+                bytes.size - offset,
+                AudioTrack.WRITE_BLOCKING,
+            )
+            check(written > 0) { "Client audio output failed ($written)" }
+            offset += written
         }
     }
 
@@ -173,6 +217,7 @@ class ClientAudioReceiver {
         runCatching { socket?.close() }
         socket = null
         allowedHost = null
+        invalidPacketCount = 0
         renderedUntilNanos = null
         audioTrack?.release()
         audioTrack = null

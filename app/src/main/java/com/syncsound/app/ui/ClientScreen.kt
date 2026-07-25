@@ -30,6 +30,7 @@ import com.syncsound.app.model.ClientConnectionState
 fun ClientScreen(viewModel: ClientViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var manualAddress by remember { mutableStateOf("") }
+    var sessionCode by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -58,6 +59,20 @@ fun ClientScreen(viewModel: ClientViewModel, onBack: () -> Unit) {
                 }
             }
 
+            Text("Join with session code", style = MaterialTheme.typography.titleLarge)
+            OutlinedTextField(
+                value = sessionCode,
+                onValueChange = { sessionCode = it.filter(Char::isDigit).take(6) },
+                label = { Text("6-digit session code") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = { viewModel.joinByCode(sessionCode) },
+                enabled = sessionCode.length == 6,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Join with code") }
+
             Text("Manual connection", style = MaterialTheme.typography.titleLarge)
             OutlinedTextField(
                 value = manualAddress,
@@ -67,7 +82,7 @@ fun ClientScreen(viewModel: ClientViewModel, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(
-                onClick = { viewModel.joinManual(manualAddress) },
+                onClick = { viewModel.joinManual(manualAddress, sessionCode) },
                 enabled = manualAddress.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Connect") }
@@ -78,14 +93,21 @@ fun ClientScreen(viewModel: ClientViewModel, onBack: () -> Unit) {
                         ClientConnectionState.CONNECTING -> "Connecting…"
                         ClientConnectionState.WAITING_APPROVAL -> "Waiting for Host approval"
                         ClientConnectionState.APPROVED -> "Connected"
+                        ClientConnectionState.RECONNECTING -> "Reconnecting…"
                         ClientConnectionState.ERROR -> "Connection failed"
                         else -> state.connectionState.name
                     },
                     style = MaterialTheme.typography.headlineSmall,
                 )
                 state.connectedHost?.let { Text("Host: $it") }
+                state.hostName?.let { Text("Name: $it") }
                 Text("Playback: ${state.playbackState.name.lowercase()}")
+                Text("Connection: ${state.connectionQuality}")
             }
+            TextButton(
+                onClick = viewModel::disconnect,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Disconnect") }
         }
         state.message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }

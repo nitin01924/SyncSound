@@ -10,6 +10,8 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.SystemClock
 import com.syncsound.app.model.PlaybackState
+import com.syncsound.app.logging.AppLog
+import com.syncsound.app.logging.LogArea
 import com.syncsound.app.network.Protocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -67,7 +69,7 @@ class HostAudioStreamer(private val context: Context) {
         }
         if (decodeJob?.isActive == true) return
         val uri = selectedUri ?: run {
-            listener.onFailure("Select an MP3 file first")
+            listener.onFailure("Select a music file first")
             return
         }
         scope?.cancel()
@@ -110,8 +112,9 @@ class HostAudioStreamer(private val context: Context) {
             extractor.selectTrack(trackIndex)
             val inputFormat = extractor.getTrackFormat(trackIndex)
             val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: error("Unknown audio format")
-            require(mime == MediaFormat.MIMETYPE_AUDIO_MPEG) { "Version 1 supports MP3 files only" }
+            require(mime.startsWith("audio/")) { "The selected file is not audio" }
             inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+            AppLog.i(LogArea.AUDIO, "decoder_opened", "mime" to mime)
             codec = MediaCodec.createDecoderByType(mime).apply {
                 configure(inputFormat, null, null, 0)
                 start()
@@ -193,9 +196,19 @@ class HostAudioStreamer(private val context: Context) {
                             listener.approvedTargets().forEach { target ->
                                 runCatching {
                                     udp.send(DatagramPacket(packet, packet.size, target, Protocol.MEDIA_PORT))
+                                }.onFailure {
+                                    AppLog.w(
+                                        LogArea.NETWORK,
+                                        "media_packet_send_failed",
+                                        it,
+                                        "target" to target.hostAddress,
+                                    )
                                 }
                             }
-                            track?.write(payload, 0, payload.size, AudioTrack.WRITE_BLOCKING)
+                            writeFully(
+                                track ?: error("Host audio output unavailable"),
+                                payload,
+                            )
                             framesSent += length / bytesPerFrame
                             offset += length
                         }
@@ -210,6 +223,7 @@ class HostAudioStreamer(private val context: Context) {
             _state.value = PlaybackState.STOPPED
             listener.onCompleted()
         } catch (exception: Exception) {
+            AppLog.e(LogArea.AUDIO, "host_audio_failed", exception)
             listener.onFailure(exception.message ?: "Audio playback failed")
             _state.value = PlaybackState.STOPPED
         } finally {
@@ -252,5 +266,19 @@ class HostAudioStreamer(private val context: Context) {
     private suspend fun paceAhead(presentationNanos: Long) {
         val maximumLead = 700_000_000L
         while (presentationNanos - SystemClock.elapsedRealtimeNanos() > maximumLead) delay(2)
+    }
+
+    private fun writeFully(track: AudioTrack, bytes: ByteArray) {
+        var offset = 0
+        while (offset < bytes.size) {
+            val written = track.write(
+                bytes,
+                offset,
+                bytes.size - offset,
+                AudioTrack.WRITE_BLOCKING,
+            )
+            check(written > 0) { "Host audio output failed ($written)" }
+            offset += written
+        }
     }
 }
