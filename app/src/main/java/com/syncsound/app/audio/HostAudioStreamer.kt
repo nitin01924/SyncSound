@@ -1,7 +1,6 @@
 package com.syncsound.app.audio
 
 import android.content.Context
-import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaCodec
@@ -14,6 +13,7 @@ import com.syncsound.app.logging.AppLog
 import com.syncsound.app.logging.LogArea
 import com.syncsound.app.network.Protocol
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -33,6 +33,7 @@ import kotlin.math.min
  * same PCM timeline to approved Clients. The object owns one playback lifecycle.
  */
 class HostAudioStreamer(private val context: Context) {
+    private val focus = AudioFocusController(context, OWNER)
     interface Listener {
         fun onFormat(sampleRate: Int, channels: Int)
         fun onStartScheduled(hostTimeNanos: Long)
@@ -75,7 +76,12 @@ class HostAudioStreamer(private val context: Context) {
         scope?.cancel()
         track?.release()
         track = null
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val exceptionHandler = CoroutineExceptionHandler { _, error ->
+            AppLog.e(LogArea.AUDIO, "host_audio_coroutine_failed", error)
+            _state.value = PlaybackState.STOPPED
+            listener.onFailure(error.message ?: "Host audio task failed")
+        }
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler)
         decodeJob = scope!!.launch { decodeAndStream(uri, listener) }
     }
 
@@ -86,6 +92,7 @@ class HostAudioStreamer(private val context: Context) {
             paused.set(true)
             track?.pause()
             _state.value = PlaybackState.PAUSED
+            AppLog.i(LogArea.AUDIO, "host_playback_paused")
         }
     }
 
@@ -97,14 +104,20 @@ class HostAudioStreamer(private val context: Context) {
         scope = null
         track?.release()
         track = null
+        focus.abandon()
         _state.value = PlaybackState.STOPPED
     }
 
     private suspend fun decodeAndStream(uri: Uri, listener: Listener) {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
-        val udp = DatagramSocket()
+        var udp: DatagramSocket? = null
         try {
+            AppLog.i(LogArea.AUDIO, "host_audio_engine_creating", "backend" to "MediaCodec+AudioTrack")
+            check(focus.request(transient = false)) {
+                "Audio focus was not granted on Host"
+            }
+            val mediaSocket = DatagramSocket().also { udp = it }
             extractor.setDataSource(context, uri, null)
             val trackIndex = (0 until extractor.trackCount).firstOrNull {
                 extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
@@ -114,11 +127,23 @@ class HostAudioStreamer(private val context: Context) {
             val mime = inputFormat.getString(MediaFormat.KEY_MIME) ?: error("Unknown audio format")
             require(mime.startsWith("audio/")) { "The selected file is not audio" }
             inputFormat.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
-            AppLog.i(LogArea.AUDIO, "decoder_opened", "mime" to mime)
+            AppLog.i(
+                LogArea.AUDIO,
+                "decoder_opening",
+                "mime" to mime,
+                "inputSampleRate" to inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE),
+                "inputChannels" to inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT),
+            )
             codec = MediaCodec.createDecoderByType(mime).apply {
                 configure(inputFormat, null, null, 0)
                 start()
             }
+            AppLog.i(
+                LogArea.AUDIO,
+                "decoder_started",
+                "codec" to codec.name,
+                "mime" to mime,
+            )
 
             val info = MediaCodec.BufferInfo()
             var inputEnded = false
@@ -158,14 +183,41 @@ class HostAudioStreamer(private val context: Context) {
                         val format = codec.outputFormat
                         sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT).coerceIn(1, 2)
+                        val pcmEncoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            format.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        } else {
+                            AudioFormat.ENCODING_PCM_16BIT
+                        }
+                        check(pcmEncoding == AudioFormat.ENCODING_PCM_16BIT) {
+                            "Decoder returned unsupported PCM encoding $pcmEncoding; PCM_16BIT required"
+                        }
                         bytesPerFrame = channels * 2
                         track = createAudioTrack(sampleRate, channels)
+                        AppLog.i(
+                            LogArea.AUDIO,
+                            "decoder_output_ready",
+                            "sampleRate" to sampleRate,
+                            "channels" to channels,
+                            "pcmEncoding" to pcmEncoding,
+                        )
                         listener.onFormat(sampleRate, channels)
                         listener.onStartScheduled(startTime)
                         scope?.launch {
                             waitUntil(startTime)
-                            track?.play()
+                            val outputTrack = track ?: error("Host AudioTrack missing at scheduled start")
+                            AppLog.i(
+                                LogArea.AUDIO,
+                                "host_play_starting",
+                                "latenessUs" to
+                                    (SystemClock.elapsedRealtimeNanos() - startTime) / 1_000,
+                            )
+                            outputTrack.play()
+                            check(outputTrack.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                                "Host play() did not enter PLAYING: " +
+                                    PcmWritePump.playStateName(outputTrack.playState)
+                            }
                             _state.value = PlaybackState.PLAYING
+                            AppLog.i(LogArea.AUDIO, "host_playback_started")
                         }
                         formatReady = true
                         _state.value = PlaybackState.BUFFERING
@@ -195,7 +247,9 @@ class HostAudioStreamer(private val context: Context) {
                             ).encode()
                             listener.approvedTargets().forEach { target ->
                                 runCatching {
-                                    udp.send(DatagramPacket(packet, packet.size, target, Protocol.MEDIA_PORT))
+                                    mediaSocket.send(
+                                        DatagramPacket(packet, packet.size, target, Protocol.MEDIA_PORT),
+                                    )
                                 }.onFailure {
                                     AppLog.w(
                                         LogArea.NETWORK,
@@ -205,12 +259,25 @@ class HostAudioStreamer(private val context: Context) {
                                     )
                                 }
                             }
-                            writeFully(
+                            PcmWritePump.writeFully(
                                 track ?: error("Host audio output unavailable"),
                                 payload,
+                                OWNER,
                             )
                             framesSent += length / bytesPerFrame
                             offset += length
+                            if (sequence % 200L == 0L) {
+                                val outputTrack = track
+                                AppLog.d(
+                                    LogArea.AUDIO,
+                                    "host_frames_written",
+                                    "sequence" to sequence,
+                                    "framesWritten" to framesSent,
+                                    "headFrames" to outputTrack?.playbackHeadPosition,
+                                    "underruns" to outputTrack?.underrunCount,
+                                    "clients" to listener.approvedTargets().size,
+                                )
+                            }
                         }
                         outputEnded = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         codec.releaseOutputBuffer(outputIndex, false)
@@ -221,6 +288,7 @@ class HostAudioStreamer(private val context: Context) {
             // final scheduled audio to drain before ending every device.
             delay(750)
             _state.value = PlaybackState.STOPPED
+            AppLog.i(LogArea.AUDIO, "host_playback_completed", "frames" to framesSent)
             listener.onCompleted()
         } catch (exception: Exception) {
             AppLog.e(LogArea.AUDIO, "host_audio_failed", exception)
@@ -230,22 +298,22 @@ class HostAudioStreamer(private val context: Context) {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             extractor.release()
-            udp.close()
+            udp?.close()
             track?.release()
             track = null
+            focus.abandon()
         }
     }
 
     private fun createAudioTrack(sampleRate: Int, channels: Int): AudioTrack {
         val mask = if (channels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val minimum = AudioTrack.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT)
+        check(minimum > 0) {
+            "Host getMinBufferSize failed: ${PcmWritePump.writeErrorName(minimum)} ($minimum)"
+        }
+        val requestedBuffer = maxOf(minimum * 4, sampleRate * channels)
         return AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
+            .setAudioAttributes(AudioFocusController.mediaAttributes())
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(sampleRate)
@@ -254,9 +322,25 @@ class HostAudioStreamer(private val context: Context) {
                     .build(),
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(maxOf(minimum * 4, sampleRate * channels))
+            .setBufferSizeInBytes(requestedBuffer)
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build()
+            .also { outputTrack ->
+                check(outputTrack.state == AudioTrack.STATE_INITIALIZED) {
+                    "Host AudioTrack initialization failed: " +
+                        PcmWritePump.trackStateName(outputTrack.state)
+                }
+                PcmWritePump.setFullVolume(outputTrack, OWNER)
+                PcmWritePump.logTrackCreated(
+                    outputTrack,
+                    OWNER,
+                    sampleRate,
+                    channels,
+                    requestedBuffer,
+                    minimum,
+                    focus,
+                )
+            }
     }
 
     private suspend fun waitUntil(targetNanos: Long) {
@@ -268,17 +352,7 @@ class HostAudioStreamer(private val context: Context) {
         while (presentationNanos - SystemClock.elapsedRealtimeNanos() > maximumLead) delay(2)
     }
 
-    private fun writeFully(track: AudioTrack, bytes: ByteArray) {
-        var offset = 0
-        while (offset < bytes.size) {
-            val written = track.write(
-                bytes,
-                offset,
-                bytes.size - offset,
-                AudioTrack.WRITE_BLOCKING,
-            )
-            check(written > 0) { "Host audio output failed ($written)" }
-            offset += written
-        }
+    companion object {
+        private const val OWNER = "host-music"
     }
 }

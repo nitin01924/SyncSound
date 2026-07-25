@@ -1,8 +1,7 @@
 package com.syncsound.app.audio
 
-import android.media.AudioAttributes
+import android.content.Context
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.SystemClock
 import com.syncsound.app.model.PlaybackState
@@ -30,7 +29,8 @@ import java.util.TreeMap
  * Receives timestamped PCM, reorders a small window, and feeds AudioTrack.
  * Playback remains paused while the queue fills, then starts on the shared time.
  */
-class ClientAudioReceiver {
+class ClientAudioReceiver(context: Context) {
+    private val focus = AudioFocusController(context, OWNER)
     private var scope: CoroutineScope? = null
     private var socket: DatagramSocket? = null
     private var audioTrack: AudioTrack? = null
@@ -41,6 +41,7 @@ class ClientAudioReceiver {
     private var startJob: Job? = null
     private var renderedUntilNanos: Long? = null
     private var invalidPacketCount = 0
+    private var framesWritten = 0L
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state
     private val _errors = MutableStateFlow<String?>(null)
@@ -56,7 +57,14 @@ class ClientAudioReceiver {
         }
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + exceptionHandler).also { receiverScope ->
             receiverScope.launch {
+                AppLog.i(
+                    LogArea.NETWORK,
+                    "client_media_socket_opening",
+                    "port" to Protocol.MEDIA_PORT,
+                    "allowedHost" to host.hostAddress,
+                )
                 val udp = DatagramSocket(Protocol.MEDIA_PORT).apply { soTimeout = 500 }.also { socket = it }
+                AppLog.i(LogArea.NETWORK, "client_media_socket_opened", "port" to udp.localPort)
                 val bytes = ByteArray(Protocol.MAX_DATAGRAM_BYTES)
                 while (isActive) {
                     try {
@@ -91,20 +99,28 @@ class ClientAudioReceiver {
     }
 
     fun configure(sampleRate: Int, channels: Int) {
+        AppLog.i(
+            LogArea.AUDIO,
+            "client_audio_configuring",
+            "sampleRate" to sampleRate,
+            "channels" to channels,
+        )
         startJob?.cancel()
         scheduledStartNanos = null
         renderedUntilNanos = null
+        framesWritten = 0L
         synchronized(lock) { queue.clear() }
         audioTrack?.release()
+        focus.abandon()
+        check(focus.request(transient = false)) { "Audio focus was not granted on Client" }
         val channelMask = if (channels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val minimum = AudioTrack.getMinBufferSize(sampleRate, channelMask, AudioFormat.ENCODING_PCM_16BIT)
+        check(minimum > 0) {
+            "Client getMinBufferSize failed: ${PcmWritePump.writeErrorName(minimum)} ($minimum)"
+        }
+        val requestedBuffer = maxOf(minimum * 4, sampleRate * channels)
         audioTrack = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .build(),
-            )
+            .setAudioAttributes(AudioFocusController.mediaAttributes())
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setSampleRate(sampleRate)
@@ -113,9 +129,26 @@ class ClientAudioReceiver {
                     .build(),
             )
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setBufferSizeInBytes(maxOf(minimum * 4, sampleRate * channels))
+            .setBufferSizeInBytes(requestedBuffer)
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build()
+            .also { track ->
+                check(track.state == AudioTrack.STATE_INITIALIZED) {
+                    "Client AudioTrack initialization failed: " +
+                        PcmWritePump.trackStateName(track.state)
+                }
+                PcmWritePump.setFullVolume(track, OWNER)
+                PcmWritePump.logTrackCreated(
+                    track,
+                    OWNER,
+                    sampleRate,
+                    channels,
+                    requestedBuffer,
+                    minimum,
+                    focus,
+                )
+            }
+        AppLog.i(LogArea.AUDIO, "client_audio_configured")
     }
 
     fun playAt(localTimeNanos: Long) {
@@ -126,8 +159,21 @@ class ClientAudioReceiver {
         startJob?.cancel()
         startJob = scope?.launch {
             while (SystemClock.elapsedRealtimeNanos() < localTimeNanos) delay(1)
-            audioTrack?.play()
+            val track = audioTrack ?: error("Client AudioTrack missing at scheduled start")
+            AppLog.i(
+                LogArea.AUDIO,
+                "client_play_starting",
+                "latenessUs" to
+                    (SystemClock.elapsedRealtimeNanos() - localTimeNanos) / 1_000,
+                "queuedPackets" to synchronized(lock) { queue.size },
+            )
+            track.play()
+            check(track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                "Client play() did not enter PLAYING: " +
+                    PcmWritePump.playStateName(track.playState)
+            }
             _state.value = PlaybackState.PLAYING
+            AppLog.i(LogArea.AUDIO, "client_playback_started")
         }
     }
 
@@ -137,6 +183,7 @@ class ClientAudioReceiver {
             while (SystemClock.elapsedRealtimeNanos() < localTimeNanos) delay(1)
             audioTrack?.pause()
             _state.value = PlaybackState.PAUSED
+            AppLog.i(LogArea.AUDIO, "client_playback_paused")
         }
     }
 
@@ -146,8 +193,10 @@ class ClientAudioReceiver {
         startJob?.cancel()
         startJob = null
         audioTrack?.run { pause(); flush() }
+        focus.abandon()
         synchronized(lock) { queue.clear() }
         _state.value = PlaybackState.STOPPED
+        AppLog.i(LogArea.AUDIO, "client_playback_stopped")
     }
 
     private suspend fun renderLoop() {
@@ -186,26 +235,27 @@ class ClientAudioReceiver {
                         .coerceAtMost(packet.sampleRate.toLong() / 5)
                     if (gapFrames > 0) {
                         val silence = ByteArray((gapFrames * bytesPerFrame).toInt())
-                        writeFully(track, silence)
+                        PcmWritePump.writeFully(track, silence, OWNER) {
+                            framesWritten += it / bytesPerFrame
+                        }
                     }
                 }
-                writeFully(track, packet.payload)
+                PcmWritePump.writeFully(track, packet.payload, OWNER) {
+                    framesWritten += it / bytesPerFrame
+                }
                 renderedUntilNanos = maxOf(renderedUntil, packetEnd)
+                if (packet.sequence % 200L == 0L) {
+                    AppLog.d(
+                        LogArea.AUDIO,
+                        "client_frames_written",
+                        "sequence" to packet.sequence,
+                        "writtenFrames" to framesWritten,
+                        "headFrames" to track.playbackHeadPosition,
+                        "underruns" to track.underrunCount,
+                        "queuedPackets" to synchronized(lock) { queue.size },
+                    )
+                }
             }
-        }
-    }
-
-    private fun writeFully(track: AudioTrack, bytes: ByteArray) {
-        var offset = 0
-        while (offset < bytes.size) {
-            val written = track.write(
-                bytes,
-                offset,
-                bytes.size - offset,
-                AudioTrack.WRITE_BLOCKING,
-            )
-            check(written > 0) { "Client audio output failed ($written)" }
-            offset += written
         }
     }
 
@@ -218,10 +268,16 @@ class ClientAudioReceiver {
         socket = null
         allowedHost = null
         invalidPacketCount = 0
+        framesWritten = 0L
         renderedUntilNanos = null
         audioTrack?.release()
         audioTrack = null
+        focus.abandon()
         synchronized(lock) { queue.clear() }
         _state.value = PlaybackState.IDLE
+    }
+
+    companion object {
+        private const val OWNER = "client-music"
     }
 }

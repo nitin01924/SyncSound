@@ -55,8 +55,8 @@ class SessionRepository(
     private val hostServer = HostControlServer()
     private val hostAudio = HostAudioStreamer(context)
     private val clientControl = ClientControlConnection()
-    private val clientAudio = ClientAudioReceiver()
-    private val syncTone = SyncTonePlayer()
+    private val clientAudio = ClientAudioReceiver(context)
+    private val syncTone = SyncTonePlayer(context)
     private val networkMonitor = NetworkMonitor(context)
     private var playlist: List<Uri> = emptyList()
     private var currentTrackIndex = 0
@@ -164,6 +164,7 @@ class SessionRepository(
                     }
                 }.onFailure {
                     AppLog.e(LogArea.AUDIO, "client_command_failed", it, "command" to command)
+                    clientAudio.stopPlayback()
                     _clientState.value = _clientState.value.copy(
                         message = "This phone could not prepare audio: ${it.message.orEmpty()}",
                     )
