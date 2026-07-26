@@ -19,6 +19,7 @@ import com.syncsound.app.logging.AppLog
 import com.syncsound.app.logging.LogArea
 import com.syncsound.app.network.Protocol
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -29,6 +30,7 @@ import kotlinx.coroutines.launch
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 
 /**
@@ -49,6 +51,7 @@ class PlaybackCaptureStreamer(private val context: Context) {
     private var job: Job? = null
     private var projection: MediaProjection? = null
     private var recorder: AudioRecord? = null
+    private val stopping = AtomicBoolean(true)
 
     val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
 
@@ -62,15 +65,19 @@ class PlaybackCaptureStreamer(private val context: Context) {
             listener.onFailure("Screen-capture permission was not granted.")
             return
         }
+        stopping.set(false)
         scope = CoroutineScope(SupervisorJob() + Dispatchers.IO).also { captureScope ->
             job = captureScope.launch {
-                runCatching { capture(resultCode, resultData, listener) }
-                    .onFailure {
-                        AppLog.e(LogArea.AUDIO, "playback_capture_failed", it)
-                        listener.onFailure(
-                            it.message ?: "Android could not capture playback audio.",
-                        )
-                    }
+                try {
+                    capture(resultCode, resultData, listener)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    AppLog.e(LogArea.AUDIO, "playback_capture_failed", error)
+                    listener.onFailure(
+                        error.message ?: "Android could not capture playback audio.",
+                    )
+                }
             }
         }
     }
@@ -89,8 +96,11 @@ class PlaybackCaptureStreamer(private val context: Context) {
             object : MediaProjection.Callback() {
                 override fun onStop() {
                     AppLog.i(LogArea.AUDIO, "playback_capture_projection_stopped")
-                    listener.onFailure("System audio sharing ended.")
-                    stop()
+                    if (stopping.compareAndSet(false, true)) {
+                        listener.onFailure("Android ended system audio sharing.")
+                        job?.cancel()
+                        runCatching { recorder?.stop() }
+                    }
                 }
             },
             null,
@@ -129,7 +139,7 @@ class PlaybackCaptureStreamer(private val context: Context) {
             }
             val streamId = System.nanoTime()
             val startTime = SystemClock.elapsedRealtimeNanos() +
-                Protocol.START_LEAD_TIME_MS * 1_000_000
+                CAPTURE_START_LEAD_TIME_MS * 1_000_000
             var frames = 0L
             var sequence = 0L
             var audibleSamples = 0L
@@ -162,7 +172,11 @@ class PlaybackCaptureStreamer(private val context: Context) {
                 val aligned = count - count % 4
                 val payload = buffer.copyOf(aligned)
                 val presentation = startTime + frames * 1_000_000_000L / SAMPLE_RATE
-                while (presentation - SystemClock.elapsedRealtimeNanos() > 800_000_000L) delay(2)
+                while (presentation - SystemClock.elapsedRealtimeNanos() >
+                    CAPTURE_SEND_AHEAD_NANOS
+                ) {
+                    delay(2)
+                }
                 val packet = PcmPacket(
                     streamId,
                     sequence++,
@@ -195,6 +209,7 @@ class PlaybackCaptureStreamer(private val context: Context) {
                 }
             }
         } finally {
+            stopping.set(true)
             udp.close()
             runCatching { record.stop() }
             record.release()
@@ -205,6 +220,7 @@ class PlaybackCaptureStreamer(private val context: Context) {
     }
 
     fun stop() {
+        stopping.set(true)
         job?.cancel()
         job = null
         scope?.cancel()
@@ -217,5 +233,9 @@ class PlaybackCaptureStreamer(private val context: Context) {
         private const val SAMPLE_RATE = 48_000
         private const val CHANNELS = 2
         private const val SILENCE_WARNING_MS = 3_000L
+        // System capture cannot be truly real-time over Wi-Fi. This bounded
+        // lead trades a small delay for enough time to absorb normal LAN jitter.
+        private const val CAPTURE_START_LEAD_TIME_MS = 250L
+        private const val CAPTURE_SEND_AHEAD_NANOS = 180_000_000L
     }
 }
