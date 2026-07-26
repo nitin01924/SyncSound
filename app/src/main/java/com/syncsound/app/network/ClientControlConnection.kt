@@ -57,6 +57,8 @@ class ClientControlConnection {
     val state: StateFlow<ClientConnectionState> = _state
     private val _quality = MutableStateFlow("Unknown")
     val quality: StateFlow<String> = _quality
+    private val _hostMinusClientEstimate = MutableStateFlow<Long?>(null)
+    val hostMinusClientEstimate: StateFlow<Long?> = _hostMinusClientEstimate
     val commands = MutableSharedFlow<ClientCommand>(extraBufferCapacity = 32)
     val errors = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
@@ -208,14 +210,16 @@ class ClientControlConnection {
             } else {
                 hostMinusClientNanos + (sampledOffset - hostMinusClientNanos) / 8
             }
+            _hostMinusClientEstimate.value = hostMinusClientNanos
         }
         val milliseconds = roundTrip / 1_000_000
-        _quality.value = when {
+        val rating = when {
             milliseconds < 20 -> "Excellent"
             milliseconds < 50 -> "Good"
             milliseconds < 100 -> "Fair"
             else -> "Poor"
         }
+        _quality.value = "$rating · ${milliseconds} ms"
         AppLog.d(
             LogArea.SYNC,
             "clock_sample",
@@ -268,6 +272,7 @@ class ClientControlConnection {
         bestRoundTrip = Long.MAX_VALUE
         lastBestResetNanos = 0L
         hostMinusClientNanos = 0L
+        _hostMinusClientEstimate.value = null
         _quality.value = "Unknown"
         _state.value = ClientConnectionState.IDLE
         AppLog.i(LogArea.SESSION, "client_disconnected")

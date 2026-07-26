@@ -2,6 +2,7 @@ package com.syncsound.app.audio
 
 import android.content.Context
 import android.media.AudioFormat
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.os.SystemClock
 import com.syncsound.app.model.PlaybackState
@@ -23,7 +24,6 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
-import java.util.TreeMap
 
 /**
  * Receives timestamped PCM, reorders a small window, and feeds AudioTrack.
@@ -34,8 +34,7 @@ class ClientAudioReceiver(context: Context) {
     private var scope: CoroutineScope? = null
     private var socket: DatagramSocket? = null
     private var audioTrack: AudioTrack? = null
-    private val queue = TreeMap<Long, PcmPacket>()
-    private val lock = Any()
+    private val queue = PacketReorderBuffer()
     @Volatile private var scheduledStartNanos: Long? = null
     @Volatile private var allowedHost: InetAddress? = null
     private var startJob: Job? = null
@@ -43,6 +42,7 @@ class ClientAudioReceiver(context: Context) {
     private var invalidPacketCount = 0
     private var framesWritten = 0L
     private var streamClockOffsetNanos: Long? = null
+    @Volatile private var targetStreamClockOffsetNanos: Long? = null
     @Volatile private var volume = 1f
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state
@@ -86,10 +86,7 @@ class ClientAudioReceiver(context: Context) {
                             }
                         }
                         decoded?.let { packet ->
-                            synchronized(lock) {
-                                queue[packet.sequence] = packet
-                                while (queue.size > 400) queue.pollFirstEntry()
-                            }
+                            queue.offer(packet)
                         }
                     } catch (_: SocketTimeoutException) {
                         // Timeout allows cancellation checks without closing a healthy stream.
@@ -112,7 +109,8 @@ class ClientAudioReceiver(context: Context) {
         renderedUntilNanos = null
         framesWritten = 0L
         streamClockOffsetNanos = null
-        synchronized(lock) { queue.clear() }
+        targetStreamClockOffsetNanos = null
+        queue.clear()
         audioTrack?.release()
         focus.abandon()
         check(focus.request(transient = false)) { "Audio focus was not granted on Client" }
@@ -161,12 +159,21 @@ class ClientAudioReceiver(context: Context) {
         AppLog.i(LogArea.AUDIO, "client_volume_changed", "volume" to volume)
     }
 
+    /**
+     * Receives the continuously refined TCP clock estimate. The media mapping
+     * uses the opposite sign and converges gradually inside renderLoop.
+     */
+    fun updateClockEstimate(hostMinusClientNanos: Long) {
+        targetStreamClockOffsetNanos = -hostMinusClientNanos
+    }
+
     fun playAt(localTimeNanos: Long, hostTimeNanos: Long) {
         val resuming = _state.value == PlaybackState.PAUSED
         scheduledStartNanos = localTimeNanos
         if (!resuming) {
             renderedUntilNanos = localTimeNanos
             streamClockOffsetNanos = localTimeNanos - hostTimeNanos
+            targetStreamClockOffsetNanos = streamClockOffsetNanos
             AppLog.i(
                 LogArea.SYNC,
                 "media_timeline_mapped",
@@ -185,7 +192,7 @@ class ClientAudioReceiver(context: Context) {
                 "client_play_starting",
                 "latenessUs" to
                     (SystemClock.elapsedRealtimeNanos() - localTimeNanos) / 1_000,
-                "queuedPackets" to synchronized(lock) { queue.size },
+                "queuedPackets" to queue.size(),
             )
             track.play()
             check(track.playState == AudioTrack.PLAYSTATE_PLAYING) {
@@ -214,7 +221,7 @@ class ClientAudioReceiver(context: Context) {
         startJob = null
         audioTrack?.run { pause(); flush() }
         focus.abandon()
-        synchronized(lock) { queue.clear() }
+        queue.clear()
         _state.value = PlaybackState.STOPPED
         AppLog.i(LogArea.AUDIO, "client_playback_stopped")
     }
@@ -229,12 +236,28 @@ class ClientAudioReceiver(context: Context) {
             }
             // Write while AudioTrack is paused so its hardware buffer is ready
             // before the separately scheduled start boundary.
-            val packet = synchronized(lock) {
-                queue.pollFirstEntry()?.value
-            }
+            val polled = queue.poll(SystemClock.elapsedRealtimeNanos())
+            val packet = polled.packet
             if (packet == null) {
                 delay(2)
             } else {
+                if (polled.skippedPackets > 0) {
+                    AppLog.w(
+                        LogArea.NETWORK,
+                        "media_packets_lost",
+                        null,
+                        "count" to polled.skippedPackets,
+                        "nextSequence" to packet.sequence,
+                    )
+                }
+                val currentOffset = streamClockOffsetNanos ?: continue
+                targetStreamClockOffsetNanos?.let { target ->
+                    streamClockOffsetNanos = currentOffset +
+                        (target - currentOffset).coerceIn(
+                            -MAX_CLOCK_STEP_NANOS,
+                            MAX_CLOCK_STEP_NANOS,
+                        )
+                }
                 val bytesPerFrame = packet.channelCount * 2
                 val packetFrames = packet.payload.size / bytesPerFrame
                 val clockOffset = streamClockOffsetNanos ?: continue
@@ -267,6 +290,8 @@ class ClientAudioReceiver(context: Context) {
                 }
                 renderedUntilNanos = maxOf(renderedUntil, packetEnd)
                 if (packet.sequence % 200L == 0L) {
+                    val timestamp = AudioTimestamp()
+                    val timestampAvailable = track.getTimestamp(timestamp)
                     AppLog.d(
                         LogArea.AUDIO,
                         "client_frames_written",
@@ -274,7 +299,12 @@ class ClientAudioReceiver(context: Context) {
                         "writtenFrames" to framesWritten,
                         "headFrames" to track.playbackHeadPosition,
                         "underruns" to track.underrunCount,
-                        "queuedPackets" to synchronized(lock) { queue.size },
+                        "queuedPackets" to queue.size(),
+                        "clockCorrectionUs" to
+                            ((targetStreamClockOffsetNanos ?: clockOffset) - clockOffset) / 1_000,
+                        "audioTimestampAvailable" to timestampAvailable,
+                        "presentedFrame" to if (timestampAvailable) timestamp.framePosition else null,
+                        "presentedAtNanos" to if (timestampAvailable) timestamp.nanoTime else null,
                     )
                 }
             }
@@ -293,14 +323,16 @@ class ClientAudioReceiver(context: Context) {
         framesWritten = 0L
         renderedUntilNanos = null
         streamClockOffsetNanos = null
+        targetStreamClockOffsetNanos = null
         audioTrack?.release()
         audioTrack = null
         focus.abandon()
-        synchronized(lock) { queue.clear() }
+        queue.clear()
         _state.value = PlaybackState.IDLE
     }
 
     companion object {
         private const val OWNER = "client-music"
+        private const val MAX_CLOCK_STEP_NANOS = 50_000L
     }
 }

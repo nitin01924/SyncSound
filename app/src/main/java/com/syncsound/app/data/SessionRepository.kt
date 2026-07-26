@@ -92,6 +92,11 @@ class SessionRepository(
             }
         }
         scope.launch {
+            clientControl.hostMinusClientEstimate.collectLatest { estimate ->
+                estimate?.let(clientAudio::updateClockEstimate)
+            }
+        }
+        scope.launch {
             clientControl.errors.collect {
                 _clientState.value = _clientState.value.copy(message = it)
             }
