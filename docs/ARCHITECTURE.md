@@ -62,7 +62,9 @@ sends a terminal removal message so Clients do not retry forever.
 
 Clients periodically ping the Host, reject clock samples distorted by network
 queueing, and continuously smooth accepted offsets so oscillator drift is
-followed over time. Play is scheduled 1.5 seconds in the future so all devices
+followed over time. The Client gradually applies refreshed clock estimates to
+the active PCM timeline and records `AudioTrack` presentation timestamps when
+the output route supplies them. File playback is scheduled 1.5 seconds in the future so all devices
 can buffer. Clients translate both the control command and every PCM packet from
 the Host monotonic domain into their own `elapsedRealtimeNanos` domain.
 
@@ -78,8 +80,14 @@ control connection.
 
 When one or more UDP packets are missing, the Client writes timestamp-derived
 silence rather than moving later audio earlier. This preserves the group
-timeline. Pause and resume are also scheduled against translated Host monotonic
-time instead of command arrival time.
+timeline. A sequence-aware jitter buffer first waits 20 ms for normally
+reordered Wi-Fi packets before declaring loss. Pause and resume are also
+scheduled against translated Host monotonic time instead of command arrival.
+
+Official Android playback capture uses a smaller 250 ms start buffer because
+the source application is already producing sound. This is best-effort low
+latency, not a zero-delay transport: capture, Wi-Fi, buffering, DAC, and speaker
+hardware all add finite delay.
 
 ## Version 1 constraints
 
