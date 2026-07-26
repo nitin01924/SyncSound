@@ -71,7 +71,11 @@ fun ScreenHeader(title: String, subtitle: String, onBack: (() -> Unit)? = null) 
                 Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Back")
             }
         }
-        Text(title, style = MaterialTheme.typography.headlineLarge)
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
         Text(
             subtitle,
             style = MaterialTheme.typography.bodyLarge,
@@ -87,7 +91,11 @@ fun SectionTitle(title: String, trailing: String? = null) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleLarge)
+        Text(
+            title,
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onBackground,
+        )
         trailing?.let {
             Text(
                 it,

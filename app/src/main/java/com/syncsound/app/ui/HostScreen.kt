@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -71,7 +72,7 @@ fun HostScreen(viewModel: HostViewModel, onBack: () -> Unit) {
     val approvedCount = state.devices.count { it.status == DeviceStatus.APPROVED }
 
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        modifier = Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp),
     ) {
@@ -291,6 +292,11 @@ fun HostScreen(viewModel: HostViewModel, onBack: () -> Unit) {
                 "DRM services and apps that disable capture cannot be transmitted.",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "Low-latency mode uses a small stability buffer; wired or phone speakers work best.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
             )
             OutlinedButton(
                 onClick = {

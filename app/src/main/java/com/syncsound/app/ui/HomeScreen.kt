@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,7 +43,8 @@ fun HomeScreen(onCreateSession: () -> Unit, onJoinSession: () -> Unit) {
                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), CircleShape),
         )
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 36.dp),
+            modifier = Modifier.fillMaxSize().safeDrawingPadding()
+                .padding(horizontal = 24.dp, vertical = 36.dp),
             verticalArrangement = Arrangement.Center,
         ) {
             Surface(
@@ -63,7 +65,11 @@ fun HomeScreen(onCreateSession: () -> Unit, onJoinSession: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
             )
-            Text("Sound,\ntogether.", style = MaterialTheme.typography.displayLarge)
+            Text(
+                "Sound,\ntogether.",
+                style = MaterialTheme.typography.displayLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
             Spacer(Modifier.height(14.dp))
             Text(
                 "Connect nearby Android phones and turn every speaker into one shared listening experience.",
