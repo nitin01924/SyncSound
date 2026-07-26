@@ -9,14 +9,16 @@ same PCM data out to approved Clients over UDP.
 
 This repository intentionally does not contain Version 2 features: Opus,
 acoustic calibration, stereo device roles, multicast media, host migration,
-cloud accounts, or arbitrary system-audio capture.
+cloud accounts, or unsupported/root-based system-audio capture. Android's
+official, policy-limited playback-capture API is available experimentally.
 
 ## Layers
 
 - `ui`: Compose screens and MVVM ViewModels.
 - `data`: the session repository, which is the single source of truth.
 - `network`: DNS-SD discovery, TCP control protocol, approval, and clock probes.
-- `audio`: MP3 decoding, bounded UDP PCM packets, buffering, and `AudioTrack`.
+- `audio`: platform decoding, optional official playback capture, bounded UDP
+  PCM packets, buffering, and `AudioTrack`.
 - `model`: immutable screen and protocol-domain models.
 - `util`: platform-independent helpers where appropriate.
 - `di`: a deliberately small manual composition root.
@@ -39,6 +41,7 @@ TCP port `45121` carries the versioned control protocol:
 - Audio format.
 - Future-timestamped play, pause, and stop commands.
 - Sync-test commands and per-device acknowledgements.
+- Session-wide playback volume.
 
 UDP port `45122` carries PCM packets no larger than 1,200 bytes. Every packet has
 a protocol version, stream ID, sequence number, Host monotonic presentation
@@ -57,10 +60,11 @@ sends a terminal removal message so Clients do not retry forever.
 
 ## Synchronization
 
-Clients periodically ping the Host and retain the clock offset from the
-lowest-round-trip sample. Play is scheduled 1.5 seconds in the future so all
-devices can buffer. Clients translate Host monotonic time into their own
-`elapsedRealtimeNanos` domain and start `AudioTrack` at that boundary.
+Clients periodically ping the Host, reject clock samples distorted by network
+queueing, and continuously smooth accepted offsets so oscillator drift is
+followed over time. Play is scheduled 1.5 seconds in the future so all devices
+can buffer. Clients translate both the control command and every PCM packet from
+the Host monotonic domain into their own `elapsedRealtimeNanos` domain.
 
 This is synchronization by presentation time, not simultaneous command arrival.
 Version 1 targets perceptually close playback on a healthy local network. It
@@ -87,4 +91,5 @@ time instead of command arrival time.
 - Android may still stop a session under exceptional resource pressure; the
   foreground notification must remain visible.
 - A router with wireless client isolation will prevent operation.
-- Clock offset is estimated, but audio hardware clock drift is not resampled.
+- Clock drift is followed for new scheduling boundaries. Android hardware/DSP
+  output latency remains device-specific and is not acoustically calibrated.

@@ -8,7 +8,7 @@ import java.io.DataOutputStream
  * keep the MVP independent from a third-party serialization runtime.
  */
 object Protocol {
-    const val VERSION = 1
+    const val VERSION = 2
     const val CONTROL_PORT = 45_121
     const val MEDIA_PORT = 45_122
     const val SERVICE_TYPE = "_syncsound._tcp."
@@ -33,7 +33,8 @@ object Protocol {
         REMOVE(12),
         TEST_TONE(13),
         TEST_RESULT(14),
-        HOST_INFO(15);
+        HOST_INFO(15),
+        VOLUME(16);
 
         companion object {
             fun fromWire(value: Int): Message =

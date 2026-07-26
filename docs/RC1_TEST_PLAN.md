@@ -37,6 +37,10 @@ Run the core scenario with:
 8. Disable and restore Wi-Fi. Verify reconnecting state appears and the device
    recovers without process termination.
 9. End the Host session. Verify Clients disconnect instead of retrying forever.
+10. Change Host volume from 100% to 25% and verify every Client follows.
+11. On Android 10+, grant experimental system-audio capture and test one source
+    that permits capture. Also test a blocked/DRM source and verify SyncSound
+    reports silence instead of crashing or claiming capture succeeded.
 
 ## Synchronization check
 

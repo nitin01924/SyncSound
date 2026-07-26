@@ -218,11 +218,16 @@ object PcmWritePump {
     }
 
     fun setFullVolume(track: AudioTrack, owner: String) {
-        val result = track.setVolume(1f)
+        setVolume(track, 1f, owner)
+    }
+
+    fun setVolume(track: AudioTrack, volume: Float, owner: String) {
+        val safeVolume = volume.coerceIn(0f, 1f)
+        val result = track.setVolume(safeVolume)
         check(result == AudioTrack.SUCCESS) {
             "$owner setVolume failed: ${writeErrorName(result)} ($result)"
         }
-        AppLog.d(LogArea.AUDIO, "audio_volume_set", "owner" to owner, "volume" to 1f)
+        AppLog.d(LogArea.AUDIO, "audio_volume_set", "owner" to owner, "volume" to safeVolume)
     }
 
     fun writeErrorName(code: Int): String = when (code) {

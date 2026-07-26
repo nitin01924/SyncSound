@@ -43,6 +43,9 @@ data class HostUiState(
     val queuePosition: Int = 0,
     val queueSize: Int = 0,
     val playbackState: PlaybackState = PlaybackState.IDLE,
+    val volume: Float = 1f,
+    val systemCaptureSupported: Boolean = false,
+    val systemCaptureActive: Boolean = false,
     val message: String? = null,
 )
 

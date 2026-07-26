@@ -1,5 +1,6 @@
 package com.syncsound.app.ui
 
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import com.syncsound.app.data.SessionRepository
@@ -23,6 +24,10 @@ class HostViewModel(private val repository: SessionRepository) : ViewModel() {
     fun pause() = repository.hostPause()
     fun stop() = repository.hostStop()
     fun skip() = repository.hostSkip()
+    fun setVolume(value: Float) = repository.setHostVolume(value)
+    fun startSystemAudioCapture(resultCode: Int, data: Intent?) =
+        repository.startSystemAudioCapture(resultCode, data)
+    fun permissionDenied(permission: String) = repository.permissionDenied(permission)
     fun disconnect() = repository.stopHosting()
 
     override fun onCleared() {

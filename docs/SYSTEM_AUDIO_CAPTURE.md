@@ -1,32 +1,43 @@
-# Experimental system-audio capture decision
+# Experimental system-audio capture
 
-Android officially provides `AudioPlaybackCapture` from Android 10 (API 29),
-using a user-approved `MediaProjection` token and an `AudioRecord` configured
-with `AudioPlaybackCaptureConfiguration`.
+SyncSound RC1 implements Android's official playback-capture path on Android 10
+(API 29) and newer. It uses a user-approved `MediaProjection`, an
+`AudioPlaybackCaptureConfiguration`, and an `AudioRecord`. The capture session
+runs while a foreground service is active with the `mediaProjection` service
+type.
 
-It is not enabled in SyncSound 1.0 RC1. The feature is optional, significantly
-expands the foreground-service and permission lifecycle, and cannot guarantee
-that a source app will provide audio. Adding it before physical validation of
-the file-streaming pipeline would increase crash risk in the release candidate.
+## What can be captured
 
-Android permits capture only when all applicable conditions are satisfied:
+Android makes the final decision. Audio is available only when all applicable
+conditions are satisfied:
 
-- The user approves the system MediaProjection prompt.
-- SyncSound has `RECORD_AUDIO`.
-- Source and capturing apps are in the same user profile.
-- Source usage is media, game, or unknown.
-- The source app and individual player allow capture.
-- DRM or a restrictive source capture policy does not block it.
+- The user grants `RECORD_AUDIO` and approves Android's screen-capture prompt.
+- Source and capturing apps are in the same Android user profile.
+- The player's usage is media, game, or unknown.
+- The source application and its individual player allow capture.
+- DRM and the source application's policy do not prohibit capture.
 
-Applications can explicitly forbid capture. SyncSound cannot and will not
-bypass that policy; unsupported sources would produce silence and must be
-reported as unavailable in any future implementation.
+SyncSound never bypasses these restrictions. It monitors captured PCM and shows
+a warning after three seconds without any audible samples. Silence can mean the
+source is paused, but it commonly indicates DRM or an application that has
+disabled playback capture.
+
+The Host continues hearing the source application normally; SyncSound forwards
+the captured PCM only to approved Clients, avoiding a doubled local echo.
+
+## Test
+
+1. Connect and approve at least one Client.
+2. On the Host, tap **Share supported system audio**.
+3. Grant the audio-recording permission and Android projection prompt.
+4. Start playback in a browser or another application that permits capture.
+5. Return to SyncSound to inspect capture status. Use **Stop** to terminate the
+   stream and projection.
+
+Netflix, Spotify, YouTube, other DRM services, and OEM applications may block
+capture. Support can vary by source application even on the same phone.
 
 Official references:
 
-- https://developer.android.com/media/platform/av-capture
 - https://developer.android.com/reference/android/media/AudioPlaybackCaptureConfiguration
-
-Post-RC implementation requires a separate foreground service with the
-`mediaProjection` type, revocation callback handling, silence/source-policy
-detection, and the same timestamped PCM distributor used by file playback.
+- https://developer.android.com/media/grow/media-projection

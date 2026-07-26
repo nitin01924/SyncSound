@@ -54,6 +54,15 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 Repeat for the second phone. Android 13+ asks for nearby-device access; allow it
 for automatic session discovery.
 
+Permissions:
+
+- **Nearby devices**: automatic local session discovery on Android 13+.
+- **Notifications**: keeps the active-session foreground notification visible.
+- **Record audio**: requested only if the Host enables experimental system-audio
+  capture. It is not needed for file playback or Test Sync.
+- **Screen capture prompt**: requested only for experimental system-audio
+  capture and must be approved for every new projection session.
+
 ## Test two devices
 
 1. Disable Bluetooth audio on both phones.
@@ -70,6 +79,11 @@ for automatic session discovery.
    both speakers.
 10. Exercise Pause, Play, Stop, and Skip. Rejecting a pending phone should prevent it
    from receiving media.
+11. Move the Host volume slider and verify the Client volume follows.
+
+For experimental system audio on Android 10+, follow
+[`docs/SYSTEM_AUDIO_CAPTURE.md`](docs/SYSTEM_AUDIO_CAPTURE.md). Android can only
+capture source applications that explicitly permit playback capture.
 
 Keep the SyncSound session notification enabled on both phones. It allows the
 network and audio session to continue when the display sleeps.
@@ -87,6 +101,8 @@ Bluetooth routes, and overloaded 2.4 GHz networks can prevent good results.
   support still depends on the codecs supplied by the phone manufacturer.
 - **Audio breaks up:** move to 5 GHz Wi-Fi, reduce the number of Clients, and
   keep all phones awake with SyncSound visible.
+- **System capture is silent:** the source may be paused, DRM-protected, in
+  another user profile, or configured to prohibit Android playback capture.
 - **Build cannot find Java:** set Gradle JDK to Android Studio's bundled JDK 17
   under Android Studio Gradle settings.
 

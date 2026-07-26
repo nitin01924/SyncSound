@@ -42,6 +42,8 @@ class ClientAudioReceiver(context: Context) {
     private var renderedUntilNanos: Long? = null
     private var invalidPacketCount = 0
     private var framesWritten = 0L
+    private var streamClockOffsetNanos: Long? = null
+    @Volatile private var volume = 1f
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state
     private val _errors = MutableStateFlow<String?>(null)
@@ -109,6 +111,7 @@ class ClientAudioReceiver(context: Context) {
         scheduledStartNanos = null
         renderedUntilNanos = null
         framesWritten = 0L
+        streamClockOffsetNanos = null
         synchronized(lock) { queue.clear() }
         audioTrack?.release()
         focus.abandon()
@@ -138,6 +141,7 @@ class ClientAudioReceiver(context: Context) {
                         PcmWritePump.trackStateName(track.state)
                 }
                 PcmWritePump.setFullVolume(track, OWNER)
+                PcmWritePump.setVolume(track, volume, OWNER)
                 PcmWritePump.logTrackCreated(
                     track,
                     OWNER,
@@ -151,10 +155,26 @@ class ClientAudioReceiver(context: Context) {
         AppLog.i(LogArea.AUDIO, "client_audio_configured")
     }
 
-    fun playAt(localTimeNanos: Long) {
+    fun setVolume(value: Float) {
+        volume = value.coerceIn(0f, 1f)
+        audioTrack?.let { PcmWritePump.setVolume(it, volume, OWNER) }
+        AppLog.i(LogArea.AUDIO, "client_volume_changed", "volume" to volume)
+    }
+
+    fun playAt(localTimeNanos: Long, hostTimeNanos: Long) {
         val resuming = _state.value == PlaybackState.PAUSED
         scheduledStartNanos = localTimeNanos
-        if (!resuming) renderedUntilNanos = localTimeNanos
+        if (!resuming) {
+            renderedUntilNanos = localTimeNanos
+            streamClockOffsetNanos = localTimeNanos - hostTimeNanos
+            AppLog.i(
+                LogArea.SYNC,
+                "media_timeline_mapped",
+                "hostStartNanos" to hostTimeNanos,
+                "clientStartNanos" to localTimeNanos,
+                "hostToClientOffsetNanos" to streamClockOffsetNanos,
+            )
+        }
         _state.value = PlaybackState.BUFFERING
         startJob?.cancel()
         startJob = scope?.launch {
@@ -217,12 +237,14 @@ class ClientAudioReceiver(context: Context) {
             } else {
                 val bytesPerFrame = packet.channelCount * 2
                 val packetFrames = packet.payload.size / bytesPerFrame
-                val packetEnd = packet.presentationTimeNanos +
+                val clockOffset = streamClockOffsetNanos ?: continue
+                val localPacketTime = packet.presentationTimeNanos + clockOffset
+                val packetEnd = localPacketTime +
                     packetFrames * 1_000_000_000L / packet.sampleRate
-                val renderedUntil = renderedUntilNanos ?: packet.presentationTimeNanos
+                val renderedUntil = renderedUntilNanos ?: localPacketTime
                 if (packetEnd <= renderedUntil) continue
 
-                val gapNanos = packet.presentationTimeNanos - renderedUntil
+                val gapNanos = localPacketTime - renderedUntil
                 if (gapNanos > 0) {
                     AppLog.w(
                         LogArea.AUDIO,
@@ -270,6 +292,7 @@ class ClientAudioReceiver(context: Context) {
         invalidPacketCount = 0
         framesWritten = 0L
         renderedUntilNanos = null
+        streamClockOffsetNanos = null
         audioTrack?.release()
         audioTrack = null
         focus.abandon()

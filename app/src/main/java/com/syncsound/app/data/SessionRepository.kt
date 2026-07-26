@@ -1,11 +1,13 @@
 package com.syncsound.app.data
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import com.syncsound.app.audio.ClientAudioReceiver
 import com.syncsound.app.audio.HostAudioStreamer
+import com.syncsound.app.audio.PlaybackCaptureStreamer
 import com.syncsound.app.audio.SyncTonePlayer
 import com.syncsound.app.model.ClientConnectionState
 import com.syncsound.app.model.ClientUiState
@@ -30,7 +32,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.net.InetAddress
 import kotlin.random.Random
 
@@ -54,6 +58,7 @@ class SessionRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + exceptionHandler)
     private val hostServer = HostControlServer()
     private val hostAudio = HostAudioStreamer(context)
+    private val playbackCapture = PlaybackCaptureStreamer(context)
     private val clientControl = ClientControlConnection()
     private val clientAudio = ClientAudioReceiver(context)
     private val syncTone = SyncTonePlayer(context)
@@ -145,7 +150,10 @@ class SessionRepository(
                         )
                         is ClientCommand.Format ->
                             clientAudio.configure(command.sampleRate, command.channels)
-                        is ClientCommand.Play -> clientAudio.playAt(command.localPresentationTimeNanos)
+                        is ClientCommand.Play -> clientAudio.playAt(
+                            command.localPresentationTimeNanos,
+                            command.hostPresentationTimeNanos,
+                        )
                         is ClientCommand.Pause ->
                             clientAudio.pauseAt(command.localPresentationTimeNanos)
                         is ClientCommand.TestTone -> syncTone.playAt(
@@ -153,6 +161,7 @@ class SessionRepository(
                         ) { success ->
                             clientControl.sendTestResult(command.testId, success)
                         }
+                        is ClientCommand.Volume -> clientAudio.setVolume(command.value)
                         is ClientCommand.Removed -> {
                             clientAudio.close()
                             _clientState.value = _clientState.value.copy(
@@ -185,6 +194,7 @@ class SessionRepository(
             hostAddress = NetworkUtils.localIpv4Address(),
             hostName = hostName,
             sessionCode = sessionCode,
+            systemCaptureSupported = playbackCapture.supported,
             message = if (foregroundStarted) "Session ready" else
                 "Session ready, but background playback is unavailable",
         )
@@ -192,6 +202,7 @@ class SessionRepository(
 
     fun stopHosting() {
         hostAudio.stop()
+        playbackCapture.stop()
         hostServer.stop()
         discovery.stopAdvertising()
         SessionForegroundService.stop(context)
@@ -249,6 +260,8 @@ class SessionRepository(
     }
 
     fun hostPlay() {
+        playbackCapture.stop()
+        _hostState.value = _hostState.value.copy(systemCaptureActive = false)
         AppLog.i(LogArea.AUDIO, "play_requested", "track" to _hostState.value.selectedTrack)
         hostAudio.play(object : HostAudioStreamer.Listener {
             override fun onFormat(sampleRate: Int, channels: Int) =
@@ -279,7 +292,9 @@ class SessionRepository(
     fun hostStop() {
         AppLog.i(LogArea.AUDIO, "stop_requested")
         hostAudio.stop()
+        playbackCapture.stop()
         hostServer.broadcastPlayback(Protocol.Message.STOP)
+        _hostState.value = _hostState.value.copy(systemCaptureActive = false)
     }
 
     fun hostSkip() {
@@ -300,6 +315,80 @@ class SessionRepository(
             message = null,
         )
         hostPlay()
+    }
+
+    fun setHostVolume(value: Float) {
+        val volume = value.coerceIn(0f, 1f)
+        hostAudio.setVolume(volume)
+        hostServer.broadcastVolume(volume)
+        _hostState.value = _hostState.value.copy(volume = volume)
+    }
+
+    fun startSystemAudioCapture(resultCode: Int, data: Intent?) {
+        if (!playbackCapture.supported) {
+            _hostState.value = _hostState.value.copy(
+                message = "System audio capture requires Android 10 or newer.",
+            )
+            return
+        }
+        if (data == null) {
+            _hostState.value = _hostState.value.copy(
+                message = "Android did not grant playback-capture permission.",
+            )
+            return
+        }
+        hostAudio.stop()
+        hostServer.broadcastPlayback(Protocol.Message.STOP)
+        scope.launch {
+            if (!SessionForegroundService.enableMediaProjection(context)) {
+                _hostState.value = _hostState.value.copy(
+                    message = "Could not start Android's playback-capture service.",
+                )
+                return@launch
+            }
+            val ready = runCatching {
+                withTimeout(3_000) {
+                    SessionForegroundService.projectionServiceReady.first { it }
+                }
+            }.isSuccess
+            if (!ready) {
+                _hostState.value = _hostState.value.copy(
+                    message = "Android did not allow the playback-capture service to start.",
+                )
+                return@launch
+            }
+            playbackCapture.start(
+                resultCode,
+                data,
+                object : PlaybackCaptureStreamer.Listener {
+                    override fun onFormat(sampleRate: Int, channels: Int) =
+                        hostServer.broadcastFormat(sampleRate, channels)
+
+                    override fun onStartScheduled(hostTimeNanos: Long) =
+                        hostServer.broadcastPlayback(Protocol.Message.PLAY, hostTimeNanos)
+
+                    override fun approvedTargets(): List<InetAddress> =
+                        hostServer.approvedAddresses()
+
+                    override fun onStatus(message: String) {
+                        _hostState.value = _hostState.value.copy(
+                            systemCaptureActive = true,
+                            playbackState = PlaybackState.PLAYING,
+                            message = message,
+                        )
+                    }
+
+                    override fun onFailure(message: String) {
+                        hostServer.broadcastPlayback(Protocol.Message.STOP)
+                        _hostState.value = _hostState.value.copy(
+                            systemCaptureActive = false,
+                            playbackState = PlaybackState.STOPPED,
+                            message = message,
+                        )
+                    }
+                },
+            )
+        }
     }
 
     fun startDiscovery() {
@@ -356,6 +445,8 @@ class SessionRepository(
                 "Nearby-device permission denied. Automatic discovery may not work; use manual IP."
             android.Manifest.permission.POST_NOTIFICATIONS ->
                 "Notifications denied. Android may hide the active-session notification."
+            android.Manifest.permission.RECORD_AUDIO ->
+                "Audio recording permission is required only for experimental system audio capture."
             else -> "A requested permission was denied."
         }
         _clientState.value = _clientState.value.copy(message = message)
@@ -375,6 +466,7 @@ class SessionRepository(
         leaveClient()
         scope.cancel()
         syncTone.close()
+        playbackCapture.stop()
         networkMonitor.close()
     }
 }

@@ -48,12 +48,19 @@ class HostAudioStreamer(private val context: Context) {
     private var listener: Listener? = null
     private var track: AudioTrack? = null
     private val paused = AtomicBoolean(false)
+    @Volatile private var volume = 1f
     private val _state = MutableStateFlow(PlaybackState.IDLE)
     val state: StateFlow<PlaybackState> = _state
 
     fun select(uri: Uri) {
         selectedUri = uri
         _state.value = PlaybackState.IDLE
+    }
+
+    fun setVolume(value: Float) {
+        volume = value.coerceIn(0f, 1f)
+        track?.let { PcmWritePump.setVolume(it, volume, OWNER) }
+        AppLog.i(LogArea.AUDIO, "host_volume_changed", "volume" to volume)
     }
 
     fun play(listener: Listener) {
@@ -331,6 +338,7 @@ class HostAudioStreamer(private val context: Context) {
                         PcmWritePump.trackStateName(outputTrack.state)
                 }
                 PcmWritePump.setFullVolume(outputTrack, OWNER)
+                PcmWritePump.setVolume(outputTrack, volume, OWNER)
                 PcmWritePump.logTrackCreated(
                     outputTrack,
                     OWNER,

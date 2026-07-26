@@ -30,9 +30,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 sealed interface ClientCommand {
     data class HostInfo(val hostName: String, val sessionCode: String) : ClientCommand
     data class Format(val sampleRate: Int, val channels: Int) : ClientCommand
-    data class Play(val localPresentationTimeNanos: Long) : ClientCommand
+    data class Play(
+        val hostPresentationTimeNanos: Long,
+        val localPresentationTimeNanos: Long,
+    ) : ClientCommand
     data class Pause(val localPresentationTimeNanos: Long) : ClientCommand
     data class TestTone(val testId: Long, val localPresentationTimeNanos: Long) : ClientCommand
+    data class Volume(val value: Float) : ClientCommand
     data class Removed(val reason: String) : ClientCommand
     data object Stop : ClientCommand
 }
@@ -46,6 +50,7 @@ class ClientControlConnection {
     @Volatile private var socket: Socket? = null
     @Volatile private var output: DataOutputStream? = null
     private var bestRoundTrip = Long.MAX_VALUE
+    private var lastBestResetNanos = 0L
     @Volatile private var hostMinusClientNanos = 0L
     private val userDisconnected = AtomicBoolean(true)
     private val _state = MutableStateFlow(ClientConnectionState.IDLE)
@@ -152,9 +157,10 @@ class ClientControlConnection {
                     Protocol.Message.PONG -> updateClock(input)
                     Protocol.Message.FORMAT ->
                         commands.emit(ClientCommand.Format(input.readInt(), input.readInt()))
-                    Protocol.Message.PLAY -> commands.emit(
-                        ClientCommand.Play(toLocalTime(input.readLong())),
-                    )
+                    Protocol.Message.PLAY -> {
+                        val hostTime = input.readLong()
+                        commands.emit(ClientCommand.Play(hostTime, toLocalTime(hostTime)))
+                    }
                     Protocol.Message.PAUSE -> commands.emit(
                         ClientCommand.Pause(toLocalTime(input.readLong())),
                     )
@@ -162,6 +168,8 @@ class ClientControlConnection {
                         val testId = input.readLong()
                         commands.emit(ClientCommand.TestTone(testId, toLocalTime(input.readLong())))
                     }
+                    Protocol.Message.VOLUME ->
+                        commands.emit(ClientCommand.Volume(input.readFloat().coerceIn(0f, 1f)))
                     Protocol.Message.STOP -> commands.emit(ClientCommand.Stop)
                     Protocol.Message.ERROR -> {
                         val message = input.readUTF().take(200)
@@ -184,9 +192,22 @@ class ClientControlConnection {
         val received = SystemClock.elapsedRealtimeNanos()
         val roundTrip = received - sent
         if (roundTrip <= 0) return
+        if (lastBestResetNanos == 0L || received - lastBestResetNanos > 30_000_000_000L) {
+            bestRoundTrip = roundTrip
+            lastBestResetNanos = received
+        }
+        val sampledOffset = host - ((sent + received) / 2)
         if (roundTrip < bestRoundTrip) {
             bestRoundTrip = roundTrip
-            hostMinusClientNanos = host - ((sent + received) / 2)
+        }
+        // Continuously follow oscillator drift, but reject samples likely skewed
+        // by queueing on a congested Wi-Fi link.
+        if (roundTrip <= (bestRoundTrip * 3 / 2).coerceAtLeast(2_000_000L)) {
+            hostMinusClientNanos = if (hostMinusClientNanos == 0L) {
+                sampledOffset
+            } else {
+                hostMinusClientNanos + (sampledOffset - hostMinusClientNanos) / 8
+            }
         }
         val milliseconds = roundTrip / 1_000_000
         _quality.value = when {
@@ -195,7 +216,13 @@ class ClientControlConnection {
             milliseconds < 100 -> "Fair"
             else -> "Poor"
         }
-        AppLog.d(LogArea.SYNC, "clock_sample", "roundTripMs" to milliseconds)
+        AppLog.d(
+            LogArea.SYNC,
+            "clock_sample",
+            "roundTripMs" to milliseconds,
+            "bestRoundTripMs" to bestRoundTrip / 1_000_000,
+            "hostMinusClientUs" to hostMinusClientNanos / 1_000,
+        )
     }
 
     fun sendTestResult(testId: Long, success: Boolean) {
@@ -239,6 +266,7 @@ class ClientControlConnection {
         scope = null
         disconnectSocket()
         bestRoundTrip = Long.MAX_VALUE
+        lastBestResetNanos = 0L
         hostMinusClientNanos = 0L
         _quality.value = "Unknown"
         _state.value = ClientConnectionState.IDLE

@@ -70,6 +70,8 @@ class HostControlServerTest {
         host.approve("stable-client")
 
         assertEquals(Protocol.Message.APPROVED, input.readMessage())
+        assertEquals(Protocol.Message.VOLUME, input.readMessage())
+        assertEquals(1f, input.readFloat(), 0f)
         check(!socket.isClosed)
         socket.close()
     }

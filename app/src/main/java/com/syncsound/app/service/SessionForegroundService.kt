@@ -16,6 +16,8 @@ import com.syncsound.app.MainActivity
 import com.syncsound.app.R
 import com.syncsound.app.logging.AppLog
 import com.syncsound.app.logging.LogArea
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /**
  * Keeps an active local-network audio session eligible to run when the display
@@ -50,12 +52,36 @@ class SessionForegroundService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int =
-        START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_ENABLE_PROJECTION) {
+            try {
+                ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification("Sharing supported playback audio"),
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                    } else {
+                        0
+                    },
+                )
+                _projectionServiceReady.value = true
+                AppLog.i(LogArea.AUDIO, "media_projection_service_ready")
+            } catch (error: Exception) {
+                _projectionServiceReady.value = false
+                AppLog.e(LogArea.AUDIO, "media_projection_service_failed", error)
+            }
+        }
+        return START_NOT_STICKY
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun notification(): Notification {
+    private fun notification(
+        detail: String = "Keeping this phone connected to the local audio session",
+    ): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -65,7 +91,7 @@ class SessionForegroundService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("SyncSound is active")
-            .setContentText("Keeping this phone connected to the local audio session")
+            .setContentText(detail)
             .setContentIntent(openApp)
             .setOngoing(true)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -75,6 +101,10 @@ class SessionForegroundService : Service() {
     companion object {
         private const val CHANNEL_ID = "syncsound_session"
         private const val NOTIFICATION_ID = 1001
+        private const val ACTION_ENABLE_PROJECTION =
+            "com.syncsound.app.action.ENABLE_MEDIA_PROJECTION"
+        private val _projectionServiceReady = MutableStateFlow(false)
+        val projectionServiceReady: StateFlow<Boolean> = _projectionServiceReady
 
         fun start(context: Context): Boolean = runCatching {
             context.startForegroundService(Intent(context, SessionForegroundService::class.java))
@@ -84,7 +114,18 @@ class SessionForegroundService : Service() {
         }.getOrDefault(false)
 
         fun stop(context: Context) {
+            _projectionServiceReady.value = false
             context.stopService(Intent(context, SessionForegroundService::class.java))
         }
+
+        fun enableMediaProjection(context: Context): Boolean = runCatching {
+            context.startForegroundService(
+                Intent(context, SessionForegroundService::class.java)
+                    .setAction(ACTION_ENABLE_PROJECTION),
+            )
+            true
+        }.onFailure {
+            AppLog.e(LogArea.AUDIO, "media_projection_service_start_failed", it)
+        }.getOrDefault(false)
     }
 }

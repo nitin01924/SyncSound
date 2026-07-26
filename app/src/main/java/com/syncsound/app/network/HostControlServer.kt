@@ -53,6 +53,7 @@ class HostControlServer(
     private var serverSocket: ServerSocket? = null
     private var hostName = ""
     private var sessionCode = ""
+    @Volatile private var currentVolume = 1f
     private val connections = ConcurrentHashMap<String, Connection>()
     private val approvedDeviceIds = ConcurrentHashMap.newKeySet<String>()
     private var outbound: Channel<Outbound>? = null
@@ -203,6 +204,7 @@ class HostControlServer(
         AppLog.i(LogArea.SESSION, "client_approved", "deviceId" to id)
         scope?.launch {
             safeSend(connection, Protocol.Message.APPROVED)
+            safeSend(connection, Protocol.Message.VOLUME) { writeFloat(currentVolume) }
         }
     }
 
@@ -246,6 +248,11 @@ class HostControlServer(
                 writeLong(hostTimeNanos)
             }
         }
+
+    fun broadcastVolume(volume: Float) {
+        currentVolume = volume.coerceIn(0f, 1f)
+        broadcast(Protocol.Message.VOLUME) { writeFloat(currentVolume) }
+    }
 
     fun startSyncTest(testId: Long, hostTimeNanos: Long) {
         connections.replaceAll { _, value ->
@@ -357,6 +364,7 @@ class HostControlServer(
         serverSocket = null
         hostName = ""
         sessionCode = ""
+        currentVolume = 1f
         closingScope?.launch {
             closingConnections.forEach {
                 safeSend(it, Protocol.Message.REMOVE)
