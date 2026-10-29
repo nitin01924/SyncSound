@@ -1,294 +1,237 @@
 <div align="center">
+  <img src="docs/assets/syncsound-hero.svg" alt="SyncSound — nearby Android phones playing together over a local network" width="100%" />
 
-# 🎵 SyncSound RC1
+  <h1>SyncSound</h1>
 
-**Stream music across multiple Android devices in perfect synchronization over Wi-Fi**
+  <img src="https://img.shields.io/badge/version-1.0.0--rc1-6042D0?style=for-the-badge" alt="Version 1.0.0 RC1" />
+  <img src="https://img.shields.io/badge/Android-8.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android 8.0 and newer" />
+  <img src="https://img.shields.io/badge/Kotlin-2.2-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin 2.2" />
+  <img src="https://img.shields.io/badge/Jetpack-Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
 
-[![Kotlin](https://img.shields.io/badge/Kotlin-100%25-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Android](https://img.shields.io/badge/Android-8.0+-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://www.android.com/)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](#)
-
----
-
+  <p><strong>Turn nearby Android phones into one shared listening experience.</strong></p>
+  <p>
+    <a href="#quick-start">Quick start</a>
+    ·
+    <a href="SETUP.md">Setup guide</a>
+    ·
+    <a href="docs/ARCHITECTURE.md">Architecture</a>
+    ·
+    <a href="docs/RC1_TEST_PLAN.md">Test plan</a>
+  </p>
 </div>
 
-## ✨ Features
+> [!IMPORTANT]
+> SyncSound is currently a **Version 1 release candidate** for local testing. Traffic stays on the local network, but it is not encrypted. Use it only on networks and with devices you trust.
 
-- 🎧 **Multi-Device Synchronization** - Stream music to multiple Android devices with precise timing
-- 📡 **Wi-Fi Direct** - Works on the same Wi-Fi network or mobile hotspot
-- 🔊 **PCM Audio Transport** - High-quality UDP streaming with intelligent buffering
-- 🎚️ **Remote Volume Control** - Host controls volume for all connected clients
-- 🔐 **Session Codes** - 6-digit session codes for easy device pairing
-- 📱 **Automatic Discovery** - Android 13+ automatic local session discovery
-- 🧪 **Test Sync** - Built-in synchronization verification
-- 🎵 **Multiple Formats** - MP3, PCM WAV, AAC, FLAC, M4A support
+## Sound, together
 
----
+SyncSound streams audio from one **Host** phone to approved **Client** phones on the same Wi-Fi network or mobile hotspot. The Host decodes audio once, distributes timestamped PCM packets, and schedules playback against a shared monotonic clock so every device starts on the same timeline.
 
-## 🚀 Quick Start
+No cloud account or internet connection is required for a session.
 
-### Prerequisites
+<table>
+  <tr>
+    <td width="33.33%" align="center" valign="top">
+      <br />
+      <strong>① Create</strong><br />
+      <sub>Start a private listening session from one phone.</sub>
+      <br /><br />
+    </td>
+    <td width="33.33%" align="center" valign="top">
+      <br />
+      <strong>② Connect</strong><br />
+      <sub>Approve nearby phones over Wi-Fi or a hotspot.</sub>
+      <br /><br />
+    </td>
+    <td width="33.33%" align="center" valign="top">
+      <br />
+      <strong>③ Listen</strong><br />
+      <sub>Press play once and hear the same moment together.</sub>
+      <br /><br />
+    </td>
+  </tr>
+</table>
 
-- **Android Studio** (Latest stable)
-- **Android SDK Platform 36** & **Build Tools 36**
-- **JDK 17** (Android Studio's bundled JDK recommended)
-- **Two Android phones** running Android 8.0+ (API 26 or newer)
-- **Same Wi-Fi network** or one connected to the other's hotspot
+| | Capability | What it gives you |
+|:--:|---|---|
+| ◉ | **Nearby discovery** | Find Hosts automatically with Android DNS-SD, or connect by session code/IP address. |
+| ✓ | **Host approval** | Review, approve, reject, and remove every phone that requests access. |
+| ≋ | **Synchronized playback** | Use clock-offset sampling, future start times, and timestamped audio to keep phones aligned. |
+| ▶ | **Shared controls** | Play a queue, pause, resume, stop, skip, and change volume from the Host. |
+| ⏱ | **Sync test** | Play a short confirmation tone and inspect the result for each connected device. |
+| ◌ | **Session resilience** | Continue in a foreground service and reconnect approved devices after brief network loss. |
 
-### Installation Steps
+## How it works
 
-#### 1️⃣ Clone & Setup
+```mermaid
+flowchart LR
+    subgraph H[Host phone]
+        direction TB
+        A[Music files] --> B[MediaExtractor<br/>+ MediaCodec]
+        B --> C[16-bit PCM]
+        C --> D[Local AudioTrack]
+        C --> E[Timestamped<br/>UDP packets]
+        F[Session controls] --> G[TCP control channel]
+    end
+
+    subgraph N[Local Wi-Fi / hotspot]
+        E --> U[UDP :45122]
+        G --> T[TCP :45121]
+    end
+
+    subgraph C1[Approved Client phones]
+        direction TB
+        T --> J[Clock sync + commands]
+        U --> K[Packet reorder buffer]
+        J --> L[Shared presentation time]
+        K --> L
+        L --> M[AudioTrack playback]
+    end
+
+    classDef source fill:#E7DEFF,stroke:#6042D0,color:#1C0060,stroke-width:2px;
+    classDef transport fill:#DDF8F2,stroke:#006B5D,color:#00201B,stroke-width:2px;
+    classDef output fill:#171A22,stroke:#B9A6FF,color:#F7F7FC,stroke-width:2px;
+    class A,B,C,F source;
+    class E,G,U,T,J,K transport;
+    class D,L,M output;
+```
+
+The control plane and media plane are intentionally separate: reliable TCP carries identity, approval, clock probes, formats, and playback commands; bounded UDP datagrams carry low-latency PCM audio. If a media packet is missing, the Client inserts timestamp-derived silence instead of pulling later audio forward and breaking the group timeline.
+
+## Quick start
+
+You will need:
+
+- Android Studio with Android SDK Platform 36
+- JDK 17 (Android Studio's bundled JDK is recommended)
+- Two physical Android phones running Android 8.0 / API 26 or newer
+- A shared Wi-Fi network or mobile hotspot
+
+Build and test the debug app:
 
 ```bash
-git clone https://github.com/nitin01924/SyncSound.git
-cd SyncSound
+./gradlew test assembleDebug
 ```
 
-#### 2️⃣ Open in Android Studio
+The APK will be available at:
 
-1. Launch **Android Studio**
-2. Select **File > Open** and choose the `SyncSound` directory
-3. Let Android Studio use its bundled **JDK 17**
-4. Accept prompts to install **Android SDK Platform 36**
-5. Select **File > Sync Project with Gradle Files**
-
-#### 3️⃣ Build the Application
-
-**From Android Studio:**
-- Use **Build > Build APK(s)**
-
-**Or from Terminal:**
-
-```bash
-# Run tests
-./gradlew test
-
-# Build debug APK
-./gradlew assembleDebug
-```
-
-The debug APK will be available at:
-```
+```text
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-#### 4️⃣ Install on Devices
-
-**Via Android Studio:**
-1. Enable **Developer Options** and **USB Debugging** on your phone
-2. Connect via USB and approve the debugging prompt
-3. Choose the device in Android Studio and press **Run**
-
-**Via Command Line (ADB):**
+Install it on both phones with Android Studio, or use ADB:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Repeat for the second device.
+See the [complete setup guide](SETUP.md) for SDK installation, permissions, release builds, and troubleshooting.
 
----
+## Start a listening session
 
-## 📖 Usage Guide
+```mermaid
+sequenceDiagram
+    autonumber
+    actor H as Host
+    participant N as Local network
+    actor C as Client
 
-### First Time Setup
-
-1. **Host Phone (Phone A):**
-   - Open SyncSound
-   - Tap **Create Session**
-   - Share the displayed 6-digit **Session Code** or **IPv4 address**
-
-2. **Client Phone (Phone B):**
-   - Open SyncSound
-   - Tap **Join Session**
-   - Select discovered Host, or enter the code/IP address manually
-
-3. **Approve Connection:**
-   - Phone A displays the pending device
-   - Tap **Approve** to connect
-
-### Test Synchronization
-
-1. Tap **Test Sync** to verify audio alignment
-2. Both phones should play a confirmation tone simultaneously
-3. Phone A will show `success` for synchronized clients
-
-### Play Music
-
-1. On Phone A, tap **Select Music**
-2. Choose one or more supported audio files
-3. Tap **Play** - audio will start on all connected devices
-4. Use **Pause**, **Play**, **Stop**, and **Skip** controls
-5. Adjust volume on the Host - clients follow automatically
-
-### Permissions
-
-- **Nearby Devices** - Automatic discovery on Android 13+
-- **Notifications** - Keeps active session visible
-- **Record Audio** - Only needed for experimental system-audio capture
-- **Screen Capture** - Required for system-audio capture feature
-
----
-
-## 📁 Project Structure
-
+    H->>N: Create and advertise session
+    C->>N: Discover Host or enter code/IP
+    C->>H: Request to join
+    H-->>C: Approve device
+    C->>H: Sample clock offset
+    H-->>C: Format + Play at T + 1.5 s
+    H-)C: Timestamped PCM packets
+    par Host playback
+        H->>H: Play at scheduled time
+    and Client playback
+        C->>C: Buffer, translate clock, and play
+    end
 ```
+
+1. Put both phones on the same Wi-Fi network and disable Bluetooth audio.
+2. On phone A, tap **Create a session**.
+3. On phone B, tap **Join a session** and select the discovered Host. The six-digit code and manual IP address are available as fallback connection methods.
+4. Approve phone B on the Host, then run **Test Sync**.
+5. Choose one or more supported audio files on the Host and press **Play**.
+
+## Technical profile
+
+| Area | Implementation |
+|---|---|
+| Platform | Native Android, single activity, minimum API 26 |
+| UI | Kotlin, Jetpack Compose, Material 3, MVVM |
+| Audio input | MP3, PCM WAV, AAC/M4A, and FLAC through Android platform codecs |
+| Audio output | 16-bit PCM through `AudioTrack` |
+| Discovery | Android NSD / DNS-SD service `_syncsound._tcp` |
+| Control transport | Versioned binary protocol over TCP `45121` |
+| Media transport | PCM over UDP `45122`, maximum 1,200-byte datagrams |
+| Synchronization | Smoothed clock offsets and a 1.5-second scheduled start lead |
+| Background operation | Visible Android foreground service |
+| Dependency injection | Small manual composition root |
+
+## Project structure
+
+```text
 SyncSound/
-├── app/                          # Main Android application
-│   ├── src/
-│   │   ├── main/
-│   │   │   ├── java/            # Kotlin source code
-│   │   │   ├── res/             # Resources (layouts, strings, colors)
-│   │   │   └── AndroidManifest.xml
-│   │   └── test/                # Unit tests
-│   └── build.gradle
-├── SETUP.md                      # Detailed setup instructions
-├── docs/
-│   ├── ARCHITECTURE.md           # System design details
-│   ├── RC1_TEST_PLAN.md         # Acceptance testing guide
-│   └── SYSTEM_AUDIO_CAPTURE.md  # Optional audio capture setup
-├── gradle/                       # Gradle wrapper configuration
-└── build.gradle                  # Project-level build config
+├── app/src/main/java/com/syncsound/app/
+│   ├── audio/       # Decode, capture, packetize, buffer, and play PCM
+│   ├── data/        # Session state and orchestration
+│   ├── di/          # Manual application composition root
+│   ├── logging/     # Structured application and crash logging
+│   ├── model/       # Immutable UI and domain models
+│   ├── network/     # Discovery, TCP control, UDP protocol, monitoring
+│   ├── service/     # Active-session foreground service
+│   ├── ui/          # Compose screens, components, and ViewModels
+│   └── util/        # Network helpers
+├── app/src/test/    # Packet, buffer, tone, and control-server tests
+├── docs/            # Architecture, test plan, and capture notes
+├── SETUP.md         # Detailed build and two-phone test guide
+└── README.md
 ```
 
----
+## Experimental system audio
 
-## 🔧 How It Works
+On Android 10 and newer, a Host can try Android's official playback-capture API to share audio from another application. This requires `RECORD_AUDIO` permission and explicit approval of Android's screen-capture prompt for each session.
 
-### Architecture Overview
+Capture availability is controlled by Android and the source app. DRM services and apps that opt out may produce silence; SyncSound does not bypass those restrictions. Read [System Audio Capture](docs/SYSTEM_AUDIO_CAPTURE.md) before testing this feature.
 
-```
-┌─────────────────────────────────────────────────┐
-│            SyncSound System Flow                │
-├─────────────────────────────────────────────────┤
-│                                                 │
-│  HOST PHONE              NETWORK      CLIENT    │
-│  ┌──────────────┐                    PHONES    │
-│  │   Select     │        Wi-Fi        ┌─────┐ │
-│  │   Music      │  ──────────────→   │ PCM │ │
-│  │              │   UDP Stream       │Buff│ │
-│  │   Decode to  │                    │ er │ │
-│  │   PCM        │  ←──────────────   │     │ │
-│  │              │   Sync Signal      └─────┘ │
-│  │   Send Sync  │                            │
-│  │   Signal     │                    ┌─────┐ │
-│  │              │  ──────────────→   │PCM  │ │
-│  └──────────────┘                    │Play │ │
-│                                      └─────┘ │
-│                                              │
-│  Shared Monotonic Presentation Timestamp    │
-│  Ensures audio playback is synchronized     │
-│                                              │
-└─────────────────────────────────────────────────┘
+## Current limitations
+
+- Best suited to small groups: stereo PCM uses roughly 1.4–1.5 Mbit/s **per Client** before Wi-Fi overhead.
+- Bluetooth introduces device-specific latency; use phone speakers or wired outputs for synchronization tests.
+- Android hardware and speaker DSP latency are not acoustically calibrated, so different phone models can still have an audible offset.
+- Routers or hotspots with wireless client isolation will prevent devices from connecting.
+- Local traffic is cleartext in Version 1. Approval limits who receives playback, but it is not cryptographic authentication.
+- Codec availability can vary by phone manufacturer even when a file type is supported by the app.
+
+## Development
+
+Run the main local checks:
+
+```bash
+./gradlew test
+./gradlew lint
+./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
-**Key Features:**
-- Audio is decoded to **PCM by the Host**
-- Transported over **UDP for low latency**
-- Clients **buffer** for consistent playback
-- All devices use a **shared timestamp** for synchronization
-
----
-
-## 🐛 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| ❌ No sessions found | Use the manual IP address shown on the Host |
-| ❌ Manual connection fails | Verify both phones can communicate; check hotspot/router settings for client isolation |
-| ❌ Audio file not accepted | Use MP3, PCM WAV, AAC, FLAC, or M4A formats |
-| ❌ Audio breaks up | Switch to 5 GHz Wi-Fi, reduce number of clients, keep phones awake |
-| ❌ System capture is silent | Source may be paused, DRM-protected, or configured to prohibit capture |
-| ❌ Build cannot find Java | Set Gradle JDK to Android Studio's bundled JDK 17 in settings |
-
-### Debug Logs
-
-Monitor application events with:
+Important events use the `SyncSound` Logcat tag with structured `area=... event=...` fields:
 
 ```bash
 adb logcat -s SyncSound
 ```
 
----
+For physical-device acceptance criteria, follow the [RC1 test plan](docs/RC1_TEST_PLAN.md).
 
-## 📚 Documentation
+## Documentation
 
-- 📋 **[SETUP.md](SETUP.md)** - Detailed build and testing instructions
-- 🏗️ **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design and architecture
-- ✅ **[docs/RC1_TEST_PLAN.md](docs/RC1_TEST_PLAN.md)** - Acceptance testing guide
-- 🎤 **[docs/SYSTEM_AUDIO_CAPTURE.md](docs/SYSTEM_AUDIO_CAPTURE.md)** - Optional system audio capture setup
-
----
-
-## 🛠️ Building for Release
-
-To create a distributable release build:
-
-1. In Android Studio, go to **Build > Generate Signed App Bundle or APK**
-2. Create a private signing key (keep it secure!)
-3. Never commit the key or passwords to version control
-
----
-
-## 📋 System Requirements
-
-| Component | Requirement |
-|-----------|-------------|
-| **Android Version** | 8.0 (API 26) or newer |
-| **SDK Platform** | 36 |
-| **Build Tools** | 36 |
-| **JDK** | 17 |
-| **Gradle** | 8.13 (auto-downloaded) |
-| **Dependencies** | Google Maven, Maven Central |
-
----
-
-## 🎯 Supported Audio Formats
-
-- 🎵 **MP3**
-- 🎵 **PCM WAV**
-- 🎵 **AAC**
-- 🎵 **FLAC**
-- 🎵 **M4A**
-
-*Actual codec support depends on your device manufacturer's supplied codecs.*
-
----
-
-## 💡 Tips for Best Results
-
-✅ Disable Bluetooth audio on both phones  
-✅ Use 5 GHz Wi-Fi for optimal performance  
-✅ Keep both phones awake while streaming  
-✅ Use MP3 files with sharp clicks for timing verification  
-✅ Keep the SyncSound foreground notification visible  
-✅ Test with files containing clear audio markers  
-
----
-
-## 📄 License
-
-This project is provided as-is for development and testing purposes.
-
----
-
-## 📞 Support
-
-For issues, questions, or detailed information:
-
-- 📖 Check the [SETUP.md](SETUP.md) file
-- 🏗️ Review the [Architecture Documentation](docs/ARCHITECTURE.md)
-- 🐛 Check [Troubleshooting Section](#-troubleshooting)
-- 📝 View diagnostic logs with `adb logcat -s SyncSound`
-
----
+- [Setup and two-device testing](SETUP.md)
+- [Version 1 architecture](docs/ARCHITECTURE.md)
+- [RC1 acceptance test plan](docs/RC1_TEST_PLAN.md)
+- [Experimental system-audio capture](docs/SYSTEM_AUDIO_CAPTURE.md)
 
 <div align="center">
-
-### ⭐ If you find this project useful, please star it! ⭐
-
-Made with ❤️ for synchronized music streaming
-
-[GitHub Repository](https://github.com/nitin01924/SyncSound) • [Releases](https://github.com/nitin01924/SyncSound/releases)
-
+  <sub>Built for nearby listening — no cloud required.</sub>
 </div>

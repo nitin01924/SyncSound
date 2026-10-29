@@ -213,13 +213,12 @@ class ClientControlConnection {
             _hostMinusClientEstimate.value = hostMinusClientNanos
         }
         val milliseconds = roundTrip / 1_000_000
-        val rating = when {
+        _quality.value = when {
             milliseconds < 20 -> "Excellent"
             milliseconds < 50 -> "Good"
             milliseconds < 100 -> "Fair"
             else -> "Poor"
         }
-        _quality.value = "$rating · ${milliseconds} ms"
         AppLog.d(
             LogArea.SYNC,
             "clock_sample",

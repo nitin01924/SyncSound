@@ -25,12 +25,6 @@ disabled playback capture.
 The Host continues hearing the source application normally; SyncSound forwards
 the captured PCM only to approved Clients, avoiding a doubled local echo.
 
-The experimental path uses a 250 ms network stability buffer. Android does not
-provide a supported API that delays or mutes another application's local output,
-so the original Host speaker cannot be made sample-aligned with captured
-third-party playback. Selected files played inside SyncSound can be aligned
-because SyncSound owns both the Host and Client presentation timelines.
-
 ## Test
 
 1. Connect and approve at least one Client.

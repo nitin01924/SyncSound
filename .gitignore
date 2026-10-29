@@ -1,12 +1,18 @@
-*.iml
+# Gradle and Android build output
 .gradle/
 .gradle-user/
-.idea/
-local.properties
 **/build/
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Local machine and IDE state
+local.properties
+.idea/
+.vscode/
+*.iml
 *.jks
 *.keystore
+
+# Operating-system metadata
 .DS_Store

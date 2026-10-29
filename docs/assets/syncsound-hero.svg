@@ -1,0 +1,132 @@
+<svg width="1400" height="520" viewBox="0 0 1400 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">SyncSound</title>
+  <desc id="desc">A dark purple and teal banner showing three Android phones connected by synchronized audio waves.</desc>
+
+  <defs>
+    <linearGradient id="background" x1="65" y1="18" x2="1328" y2="533" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#11131B"/>
+      <stop offset="0.5" stop-color="#151329"/>
+      <stop offset="1" stop-color="#071C1A"/>
+    </linearGradient>
+    <linearGradient id="headline" x1="75" y1="134" x2="570" y2="360" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F7FC"/>
+      <stop offset="0.65" stop-color="#E7DEFF"/>
+      <stop offset="1" stop-color="#95F8E3"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="695" y1="118" x2="1311" y2="372" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B9A6FF"/>
+      <stop offset="0.5" stop-color="#8066EB"/>
+      <stop offset="1" stop-color="#71DBC8"/>
+    </linearGradient>
+    <linearGradient id="phoneScreen" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#282344"/>
+      <stop offset="1" stop-color="#101C20"/>
+    </linearGradient>
+    <radialGradient id="purpleGlow" cx="0" cy="0" r="1" gradientTransform="translate(690 232) rotate(14) scale(470 315)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6042D0" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#6042D0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="tealGlow" cx="0" cy="0" r="1" gradientTransform="translate(1238 402) rotate(-151) scale(360 250)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#006B5D" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#006B5D" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="200%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#030408" flood-opacity="0.6"/>
+    </filter>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="38" height="38" patternUnits="userSpaceOnUse">
+      <path d="M38 0H0V38" stroke="#FFFFFF" stroke-opacity="0.035"/>
+    </pattern>
+    <clipPath id="frame">
+      <rect width="1400" height="520" rx="34"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#frame)">
+    <rect width="1400" height="520" fill="url(#background)"/>
+    <rect width="1400" height="520" fill="url(#grid)"/>
+    <rect width="1400" height="520" fill="url(#purpleGlow)"/>
+    <rect width="1400" height="520" fill="url(#tealGlow)"/>
+    <circle cx="1321" cy="36" r="190" stroke="#95F8E3" stroke-opacity="0.08" stroke-width="2"/>
+    <circle cx="1321" cy="36" r="138" stroke="#95F8E3" stroke-opacity="0.07" stroke-width="2"/>
+    <circle cx="39" cy="495" r="140" stroke="#B9A6FF" stroke-opacity="0.07" stroke-width="2"/>
+
+    <g transform="translate(82 78)">
+      <g transform="translate(0 3)">
+        <rect width="48" height="48" rx="15" fill="#6042D0"/>
+        <path d="M13 25H18L21 15L26 34L30 20L33 25H37" stroke="#F7F7FC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <text x="65" y="38" fill="#B9A6FF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="24" font-weight="700" letter-spacing="5">SYNCSOUND</text>
+    </g>
+
+    <text x="78" y="245" fill="url(#headline)" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="760" letter-spacing="-3">Sound,</text>
+    <text x="78" y="330" fill="url(#headline)" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="760" letter-spacing="-3">together.</text>
+    <text x="83" y="385" fill="#C3C7D3" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="450">Synchronized local audio for nearby Android phones.</text>
+
+    <g transform="translate(83 429)">
+      <rect width="151" height="43" rx="21.5" fill="#B9A6FF" fill-opacity="0.12" stroke="#B9A6FF" stroke-opacity="0.38"/>
+      <circle cx="24" cy="21.5" r="5" fill="#95F8E3" filter="url(#softGlow)"/>
+      <text x="39" y="28" fill="#E7DEFF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">LOCAL FIRST</text>
+      <rect x="164" width="175" height="43" rx="21.5" fill="#71DBC8" fill-opacity="0.1" stroke="#71DBC8" stroke-opacity="0.32"/>
+      <path d="M184 25C189 18 195 18 200 25M188 28C191 25 194 25 197 28" stroke="#95F8E3" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="192.5" cy="31" r="1.5" fill="#95F8E3"/>
+      <text x="210" y="28" fill="#DDF8F2" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="650">NO CLOUD</text>
+    </g>
+
+    <g opacity="0.68">
+      <path d="M668 261C727 182 792 181 850 259C906 334 970 333 1028 258C1085 184 1150 183 1215 260C1255 308 1292 314 1332 294" stroke="url(#wave)" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 12"/>
+      <path d="M670 285C735 228 789 229 850 284C912 340 967 339 1027 284C1090 227 1146 228 1211 285C1256 324 1297 322 1334 298" stroke="url(#wave)" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"/>
+    </g>
+
+    <g filter="url(#shadow)">
+      <g transform="translate(746 176) rotate(-8 72 137)">
+        <rect width="144" height="274" rx="31" fill="#0C0E14" stroke="#7665B8" stroke-width="2"/>
+        <rect x="9" y="10" width="126" height="254" rx="24" fill="url(#phoneScreen)"/>
+        <rect x="51" y="18" width="42" height="7" rx="3.5" fill="#090B10"/>
+        <circle cx="72" cy="113" r="36" fill="#6042D0" fill-opacity="0.2" stroke="#B9A6FF" stroke-opacity="0.45"/>
+        <path d="M48 114H56L61 95L68 132L76 103L82 122L88 108L94 114H98" stroke="#B9A6FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="31" y="177" width="82" height="10" rx="5" fill="#E7DEFF" fill-opacity="0.72"/>
+        <rect x="44" y="197" width="56" height="7" rx="3.5" fill="#C3C7D3" fill-opacity="0.32"/>
+        <circle cx="72" cy="232" r="9" fill="#71DBC8"/>
+      </g>
+
+      <g transform="translate(944 90)">
+        <rect width="176" height="334" rx="38" fill="#0A0C12" stroke="#B9A6FF" stroke-width="2.5"/>
+        <rect x="10" y="11" width="156" height="312" rx="29" fill="url(#phoneScreen)"/>
+        <rect x="61" y="19" width="54" height="8" rx="4" fill="#090B10"/>
+        <circle cx="88" cy="136" r="52" fill="#6042D0" fill-opacity="0.22" stroke="#B9A6FF" stroke-opacity="0.5"/>
+        <circle cx="88" cy="136" r="38" fill="#6042D0" fill-opacity="0.22"/>
+        <path d="M52 137H61L67 112L76 159L86 120L94 149L102 126L109 137H124" stroke="url(#wave)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="88" y="215" text-anchor="middle" fill="#F7F7FC" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16" font-weight="700" letter-spacing="2">HOST</text>
+        <rect x="42" y="234" width="92" height="10" rx="5" fill="#F7F7FC" fill-opacity="0.74"/>
+        <rect x="57" y="254" width="62" height="7" rx="3.5" fill="#C3C7D3" fill-opacity="0.34"/>
+        <rect x="47" y="282" width="82" height="22" rx="11" fill="#6042D0"/>
+        <circle cx="63" cy="293" r="4" fill="#95F8E3"/>
+        <text x="73" y="298" fill="#F7F7FC" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="11" font-weight="650">PLAYING</text>
+      </g>
+
+      <g transform="translate(1178 172) rotate(8 72 137)">
+        <rect width="144" height="274" rx="31" fill="#0C0E14" stroke="#3F8F82" stroke-width="2"/>
+        <rect x="9" y="10" width="126" height="254" rx="24" fill="url(#phoneScreen)"/>
+        <rect x="51" y="18" width="42" height="7" rx="3.5" fill="#090B10"/>
+        <circle cx="72" cy="113" r="36" fill="#006B5D" fill-opacity="0.25" stroke="#71DBC8" stroke-opacity="0.45"/>
+        <path d="M47 114H55L60 101L67 129L74 96L82 125L88 107L95 114H99" stroke="#71DBC8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect x="31" y="177" width="82" height="10" rx="5" fill="#DDF8F2" fill-opacity="0.72"/>
+        <rect x="44" y="197" width="56" height="7" rx="3.5" fill="#C3C7D3" fill-opacity="0.32"/>
+        <circle cx="72" cy="232" r="9" fill="#71DBC8"/>
+      </g>
+    </g>
+
+    <g filter="url(#softGlow)">
+      <circle cx="922" cy="263" r="5" fill="#B9A6FF"/>
+      <circle cx="1144" cy="263" r="5" fill="#71DBC8"/>
+    </g>
+  </g>
+  <rect x="1" y="1" width="1398" height="518" rx="33" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+</svg>

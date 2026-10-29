@@ -293,11 +293,6 @@ fun HostScreen(viewModel: HostViewModel, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Text(
-                "Low-latency mode uses a small stability buffer; wired or phone speakers work best.",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.bodySmall,
-            )
             OutlinedButton(
                 onClick = {
                     if (ContextCompat.checkSelfPermission(

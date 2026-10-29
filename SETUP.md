@@ -84,10 +84,6 @@ Permissions:
 For experimental system audio on Android 10+, follow
 [`docs/SYSTEM_AUDIO_CAPTURE.md`](docs/SYSTEM_AUDIO_CAPTURE.md). Android can only
 capture source applications that explicitly permit playback capture.
-System capture uses a 250 ms stability buffer. The source application's Host
-output is not controllable by SyncSound, so it will be heard before remote
-Clients; this is an Android platform limitation rather than a configurable
-SyncSound delay.
 
 Keep the SyncSound session notification enabled on both phones. It allows the
 network and audio session to continue when the display sleeps.
